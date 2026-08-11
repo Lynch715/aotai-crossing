@@ -79,11 +79,13 @@ test/
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test",
     "build": "node build.mjs"
   }
 }
 ```
+
+> **注意**：`node --test test/`（带目录参数）在 Node v25 下会失败——目录路径被当成 CJS 模块加载。用无参数的 `node --test`，它按默认模式自动发现 `test/*.test.js`；这样 `npm test` 跑全部、`npm test -- test/x.test.js` 正好跑单个，与本计划后续各任务的命令一致。
 
 - [ ] **Step 2: 写失败的测试**
 
