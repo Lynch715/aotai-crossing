@@ -1,0 +1,8 @@
+# 头脑风暴可视化陪伴的临时产物
+.superpowers/
+
+# 构建产物
+dist/
+
+node_modules/
+.DS_Store
