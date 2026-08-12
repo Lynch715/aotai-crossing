@@ -86,6 +86,22 @@ test('consumeItem 对没有的物品返回 false', () => {
   assert.equal(consumeItem(s, 'stove', 8), false)
 })
 
+test('写入层拒收脏数量与脏百分比', () => {
+  const s = 基础状态()
+  const 原重 = s.carry.当前
+
+  for (const 坏值 of [0, -1, NaN, Infinity, undefined]) {
+    assert.equal(addItem(s, 'ibuprofen', '基础', 坏值), false, `addItem 收下了 ${坏值}`)
+    assert.equal(removeItem(s, 'staple_food', 坏值), false, `removeItem 收下了 ${坏值}`)
+  }
+  assert.equal(s.carry.当前, 原重, '脏调用不该改动负重')
+
+  // 负百分比等于凭空加满
+  addItem(s, 'stove', '主流', 1)
+  assert.equal(consumeItem(s, 'stove', -10), false)
+  assert.equal(s.pack.find((p) => p.gearId === 'stove').余量, 100, '余量不该被负百分比抬高')
+})
+
 test('快照与回滚是深拷贝，互不影响', () => {
   const s = 基础状态()
   const snap = snapshot(s)

@@ -1403,6 +1403,7 @@ export function recalcCarry(state) {
 export function addItem(state, gearId, 档, 数量 = 1) {
   const tier = tierOf(gearId, 档)
   if (!tier) return false
+  if (!Number.isFinite(数量) || 数量 <= 0) return false
   const 已有 = state.pack.find((p) => p.gearId === gearId)
   if (已有) {
     // 换档要同步替换整摞的档次与单重。只加数量不改单重的话，负重会按旧档
@@ -1418,6 +1419,7 @@ export function addItem(state, gearId, 档, 数量 = 1) {
 }
 
 export function removeItem(state, gearId, 数量 = 1) {
+  if (!Number.isFinite(数量) || 数量 <= 0) return false
   const i = state.pack.findIndex((p) => p.gearId === gearId)
   if (i === -1) return false
   state.pack[i].数量 -= 数量
@@ -1428,6 +1430,9 @@ export function removeItem(state, gearId, 数量 = 1) {
 
 // 按百分比消耗（气罐、净水药片这类）。归零则摘出背包。
 export function consumeItem(state, gearId, 百分比) {
+  // 负百分比等于凭空把消耗品加满，必须拦。写入层自己守住，
+  // 不指望每个调用点都记得校验。
+  if (!Number.isFinite(百分比) || 百分比 <= 0) return false
   const item = state.pack.find((p) => p.gearId === gearId)
   if (!item) return false
   item.余量 -= 百分比
@@ -3124,7 +3129,7 @@ git commit -m "feat: 混合协议解析，容忍模型的各种不规矩输出"
 >
 > 实测：`addItem(s, id, 档, -1)` 会造出 `数量: -1`、负负重的条目；`consumeItem(s, id, -10)` 会把 `余量` 从 100 涨到 110，等于凭空回满。`state.js` 不拦是对的——它是写入层，校验属于本模块的职责。
 >
-> **因此本任务必须保证：凡是流向 `addItem` / `removeItem` / `consumeItem` 的数量与百分比，一律先校验为正数且非零。** 这些函数既被 LLM 提议路径调用，也被引擎内部（T8–T11）调用，后者同样可能传进脏值。
+> **落实情况（T14 期间复核后修正）：** 复核发现 STATE 协议里**根本没有物品变更字段**——物品只由引擎按规则消耗，LLM 提议不了。所以这个洞不在本模块，而在 `state.js` 自己身上。已直接给 `addItem` / `removeItem` / `consumeItem` 加上「数量与百分比必须是有限正数」的守卫：写入层自己守住，不指望每个调用点都记得校验。本模块只管 LLM 真正能提议的东西（好感、记忆、伏笔、选项门槛、去向）。
 
 
 **Files:**

@@ -45,6 +45,7 @@ export function recalcCarry(state) {
 export function addItem(state, gearId, 档, 数量 = 1) {
   const tier = tierOf(gearId, 档)
   if (!tier) return false
+  if (!Number.isFinite(数量) || 数量 <= 0) return false
   const 已有 = state.pack.find((p) => p.gearId === gearId)
   if (已有) {
     // 换档要同步替换整摞的档次与单重。只加数量不改单重的话，负重会按旧档
@@ -60,6 +61,7 @@ export function addItem(state, gearId, 档, 数量 = 1) {
 }
 
 export function removeItem(state, gearId, 数量 = 1) {
+  if (!Number.isFinite(数量) || 数量 <= 0) return false
   const i = state.pack.findIndex((p) => p.gearId === gearId)
   if (i === -1) return false
   state.pack[i].数量 -= 数量
@@ -70,6 +72,9 @@ export function removeItem(state, gearId, 数量 = 1) {
 
 // 按百分比消耗（气罐、净水药片这类）。归零则摘出背包。
 export function consumeItem(state, gearId, 百分比) {
+  // 负百分比等于凭空把消耗品加满，必须拦。写入层自己守住，
+  // 不指望每个调用点都记得校验。
+  if (!Number.isFinite(百分比) || 百分比 <= 0) return false
   const item = state.pack.find((p) => p.gearId === gearId)
   if (!item) return false
   item.余量 -= 百分比
