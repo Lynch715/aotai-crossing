@@ -17,6 +17,7 @@ export const MODULE_ORDER = [
   'src/engine/affinity.js',
   'src/engine/ending.js',
   'src/engine/journal.js',
+  'src/engine/party.js',
   'src/llm/parser.js',
   'src/llm/validate.js',
   'src/llm/prompt.js',
