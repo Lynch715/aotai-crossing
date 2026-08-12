@@ -35,3 +35,36 @@ test('拼接结果被 IIFE 包裹', () => {
   assert.ok(out.trimStart().startsWith(';(function () {'))
   assert.ok(out.trimEnd().endsWith('})();'))
 })
+
+test('模板字符串续行中以 export/import 开头的中文内容不被改写', () => {
+  // 模拟 Task 15 那类大段多行模板：续行在列 0，偶尔以 export/import 汉字开头。
+  // 旧宽松正则会删掉 "import 一段说明" 整行，并剥掉 "export 你的数据" 的 "export "。
+  const src = [
+    "export const PROMPT = `",
+    "export 你的数据",
+    "import 一段说明",
+    "export：见下表",
+    "`",
+    "",
+  ].join('\n')
+  const out = stripModuleSyntax(src)
+  // export 声明本身应被剥掉关键字
+  assert.ok(out.includes('const PROMPT = `'), 'export const 声明未被正确剥离')
+  // 模板字符串内的续行必须完整保留
+  assert.ok(out.includes('export 你的数据'), '"export 你的数据" 被错误改写')
+  assert.ok(out.includes('import 一段说明'), '"import 一段说明" 被错误删除')
+  assert.ok(out.includes('export：见下表'), '"export：见下表" 被错误改写')
+})
+
+test('export async function 与 export class 形式均被正确处理', () => {
+  const src = [
+    'export async function bar() {}',
+    'export class Baz {}',
+    'export let x = 1',
+    'export var y = 2',
+  ].join('\n')
+  assert.equal(
+    stripModuleSyntax(src),
+    ['async function bar() {}', 'class Baz {}', 'let x = 1', 'var y = 2'].join('\n'),
+  )
+})
