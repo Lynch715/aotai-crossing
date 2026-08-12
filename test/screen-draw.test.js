@@ -58,7 +58,7 @@ test('视图模型带出卡片所需的全部字段', () => {
     assert.equal(卡.职业, npc.职业)
     assert.deepEqual(卡.技能, npc.技能)
     assert.equal(卡.状态, npc.状态)
-    assert.ok(卡.立绘, '缺立绘占位')
+    assert.ok(卡.npcId, '缺 npcId——渲染层要靠它探测真图')
     assert.equal(typeof 卡.好感, 'number')
   }
 })

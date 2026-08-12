@@ -60,3 +60,40 @@ export function portraitSvg(id) {
 export function portraitPath(npcId, 状态) {
   return `assets/portraits/${npcId}${状态 ? '_' + 状态 : ''}.png`
 }
+
+// 真图的候选路径，按优先级排：先试状态专属图，再退回基础图。
+// 拆成纯函数是为了能在没有 DOM 的 node --test 里验顺序。
+export function portraitCandidates(npcId, 状态) {
+  const out = []
+  if (状态) out.push(portraitPath(npcId, 状态))
+  out.push(portraitPath(npcId))
+  return out
+}
+
+// 把立绘装进容器：先摆程序化占位，真图加载成功再顶替。
+//
+// 必须用 <img> 的 onload/onerror 探测，不能用 fetch —— 玩家双击打开是 file://，
+// 那下面 fetch 会被 CORS 挡死，而 <img src> 不受影响。这是「没有美术资源也能玩、
+// 有了图零改代码升级」这条设计能成立的关键。
+export function portraitInto(容器, npcId, 状态) {
+  容器.innerHTML = portraitSvg(npcId) // portrait-svg-safe
+  const 候选 = portraitCandidates(npcId, 状态)
+  let i = 0
+  const 试下一张 = () => {
+    if (i >= 候选.length) return
+    const img = new Image()
+    img.alt = ''
+    img.className = 'portrait-img'
+    img.onload = () => {
+      容器.innerHTML = ''
+      容器.appendChild(img)
+    }
+    img.onerror = () => {
+      i += 1
+      试下一张()
+    }
+    img.src = 候选[i]
+  }
+  试下一张()
+  return 容器
+}

@@ -4,6 +4,7 @@
 
 import { el, setText, clear } from './dom.js'
 import { createRouter } from './router.js'
+import { portraitInto } from './portrait.js'
 import { loadConfig, saveConfig, configViewModel } from './config.js'
 import { createViewModel, randomDraft, deriveExperience } from './screen-create.js'
 import { drawCompanions, drawViewModel } from './screen-draw.js'
@@ -293,9 +294,8 @@ function renderDraw(router) {
   for (const c of vm.卡片) {
     const APP卡片 = el('div', { class: 'panel' })
 
-    // 立绘：唯一允许的 innerHTML 例外（本地生成的静态 SVG，不含任何外部输入）
-    const APP立绘容器 = el('div', { class: 'portrait' })
-    APP立绘容器.innerHTML = c.立绘 // portrait-svg-safe
+    // 立绘：先摆程序化占位，assets/portraits/ 里有真图就顶替
+    const APP立绘容器 = portraitInto(el('div', { class: 'portrait' }), c.npcId)
 
     APP卡片.appendChild(APP立绘容器)
     APP卡片.appendChild(el('h3', { text: c.名称 }))

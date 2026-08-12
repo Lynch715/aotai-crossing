@@ -39,7 +39,9 @@ test('src/ui 下没有任何模块把变量拼进 innerHTML', () => {
       // 已断言其中没有 <script 与 on*= ——这是唯一的例外，必须显式标注才放行
       if (line.includes('portrait-svg-safe')) return
       const 有插值 = /\$\{/.test(line)
-      const 拼变量 = /innerHTML\s*(\+)?=\s*[^'"`]/.test(line)
+      // 排除空白：不然 \s* 会回溯成零宽，让 [^'"`] 把空格本身当成「非引号字符」匹配上，
+      // 于是 innerHTML = '' 这种合法静态赋值被误判
+      const 拼变量 = /innerHTML\s*(\+)?=\s*[^\s'"`]/.test(line)
       if (有插值 || 拼变量) 违规.push(`${f}:${i + 1}  ${line.trim()}`)
     })
   }
@@ -79,4 +81,21 @@ test('el 的 on* 只接函数，传字符串直接报错而不是变成内联处
   assert.equal(d.listeners[0][0], 'click')
   assert.equal(d.attrs.onclick, undefined, 'onclick 不该出现在属性里')
   delete globalThis.document
+})
+
+test('护栏本身：合法的静态赋值不该被误判', () => {
+  const 合法 = [
+    "  容器.innerHTML = ''",
+    '  node.innerHTML = ""',
+    '  x.innerHTML = `<div class="a"></div>`',
+    "  el.innerHTML = '<span></span>'",
+  ]
+  const 违规 = ['  x.innerHTML = name', '  x.innerHTML = `<b>${name}</b>`', '  x.innerHTML += data']
+  const 判 = (line) => {
+    if (!/innerHTML\s*(\+)?=/.test(line)) return false
+    if (line.includes('portrait-svg-safe')) return false
+    return /\$\{/.test(line) || /innerHTML\s*(\+)?=\s*[^\s'"`]/.test(line)
+  }
+  for (const l of 合法) assert.equal(判(l), false, `误伤了合法写法：${l.trim()}`)
+  for (const l of 违规) assert.equal(判(l), true, `没拦住违规写法：${l.trim()}`)
 })

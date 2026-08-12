@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -100,4 +100,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = join(ROOT, 'dist/穿越鳌太线.html')
   writeFileSync(out, buildHtml(), 'utf8')
   console.log(`已生成 ${out}`)
+
+  // 立绘按相对路径 assets/portraits/xxx.png 加载，必须跟产物放在同一层，
+  // 否则从 dist/ 里解析会指向 dist/assets/——图永远加载不到，且只会静默
+  // 退回占位，没有任何报错。
+  const 素材源 = join(ROOT, 'assets')
+  if (existsSync(素材源)) {
+    cpSync(素材源, join(ROOT, 'dist/assets'), { recursive: true })
+    const n = readdirSync(join(ROOT, 'dist/assets/portraits')).filter((f) => f.endsWith('.png')).length
+    console.log(`已复制 assets/（立绘 ${n} 张）`)
+  } else {
+    console.log('未发现 assets/，立绘将全部使用程序化占位')
+  }
 }

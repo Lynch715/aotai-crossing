@@ -1,7 +1,6 @@
 import { RANDOM_POOL, getNpc, PERSONALITY_TAGS } from '../data/npcs.js'
 import { initialAffinity } from '../engine/affinity.js'
 import { rollInt } from '../engine/rng.js'
-import { portraitSvg } from './portrait.js'
 
 export const MAX_REDRAW = 1
 
@@ -38,7 +37,6 @@ export function drawViewModel(抽到, 已重抽次数) {
         状态: npc.状态,
         好感: c.好感,
         带伤: npc.状态 !== '正常',
-        立绘: portraitSvg(c.npcId),
       }
     }),
     可重抽: 已重抽次数 < MAX_REDRAW,

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { portraitSeed, portraitTheme, portraitSvg, portraitPath } from '../src/ui/portrait.js'
+import { portraitSeed, portraitTheme, portraitSvg, portraitPath, portraitCandidates } from '../src/ui/portrait.js'
 import { NPCS } from '../src/data/npcs.js'
 
 test('同一 id 恒得同一种子，不同 id 基本不撞', () => {
@@ -49,4 +49,22 @@ test('主角男女的渐变 id 不会撞车', () => {
   const 男 = 取id(portraitSvg('pc:男:7'))
   const 女 = 取id(portraitSvg('pc:女:7'))
   assert.notEqual(男, 女, '两张立绘共用同一个渐变，后渲染的会顶掉前一个')
+})
+
+test('候选路径：无状态时只试基础图', () => {
+  assert.deepEqual(portraitCandidates('chenyan'), ['assets/portraits/chenyan.png'])
+})
+
+test('候选路径：有状态时先试状态图，再退回基础图', () => {
+  assert.deepEqual(portraitCandidates('chenyan', 'hurt'), [
+    'assets/portraits/chenyan_hurt.png',
+    'assets/portraits/chenyan.png',
+  ])
+})
+
+test('候选路径末位恒为基础图——状态图缺失不该让人变成空白', () => {
+  for (const 状态 of ['hurt', 'cold', '查无此状态']) {
+    const c = portraitCandidates('linxiaoya', 状态)
+    assert.equal(c[c.length - 1], 'assets/portraits/linxiaoya.png')
+  }
 })
