@@ -534,3 +534,12 @@ html, body { overflow-x: hidden; }
   max-height: 320px;
   overflow-y: auto;
 }
+
+/* 常规校验警告：不打扰，一行小字可展开 */
+.notice.quiet {
+  background: none;
+  border: 1px solid var(--line-soft);
+  padding: 4px 10px;
+}
+.notice.quiet .link-btn { color: var(--text-faint); text-decoration: none; }
+.notice.quiet .link-btn:hover { color: var(--text-dim); }

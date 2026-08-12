@@ -826,14 +826,29 @@ function renderGame(router) {
     // 玩家只会看到四个来路不明的兜底选项，既不知道出了什么事，也没法反馈。
     // 静默降级比报错更难查。
     if (r.降级 || (r.warnings && r.warnings.length)) {
-      const APP诊断 = el('div', { class: r.降级 ? 'notice warn' : 'notice info' })
-      APP诊断.appendChild(el('div', {
-        text: r.降级
-          ? '模型这回合没按格式回复，已用备用选项让你继续走。本回合的好感与记忆未结算。'
-          : '本回合有几处提议被校验拦下了（不影响继续玩）。',
-      }))
-      for (const w of r.warnings || []) {
-        APP诊断.appendChild(el('div', { class: 'muted', text: '· ' + w }))
+      // 降级是真出事了，要显眼；被拦一两条提议是校验层在正常干活，
+      // 玩家不需要看到「合法相邻节点」「驳回」这种开发者黑话——
+      // 收成一行可展开的小字就够了。
+      const APP诊断 = el('div', { class: r.降级 ? 'notice warn' : 'notice quiet' })
+      if (r.降级) {
+        APP诊断.appendChild(el('div', {
+          text: '模型这回合没按格式回复，已用备用选项让你继续走。本回合的好感与记忆未结算。',
+        }))
+        for (const w of r.warnings || []) {
+          APP诊断.appendChild(el('div', { class: 'muted', text: '· ' + w }))
+        }
+      } else {
+        const APP详情 = el('div', { hidden: true })
+        for (const w of r.warnings || []) {
+          APP详情.appendChild(el('div', { class: 'muted', text: '· ' + w }))
+        }
+        const APP开关 = el('button', { class: 'link-btn' }, [`本回合有 ${r.warnings.length} 处提议被拦下 · 详情`])
+        APP开关.addEventListener('click', () => {
+          APP详情.hidden = !APP详情.hidden
+          setText(APP开关, APP详情.hidden ? `本回合有 ${r.warnings.length} 处提议被拦下 · 详情` : '收起')
+        })
+        APP诊断.appendChild(APP开关)
+        APP诊断.appendChild(APP详情)
       }
       if (r.原文) {
         const APP展开 = el('button', { class: 'link-btn' }, ['查看模型原始回复'])

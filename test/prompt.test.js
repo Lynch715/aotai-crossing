@@ -4,6 +4,7 @@ import { buildSystemPrompt, buildUserMessage, buildRepairMessage } from '../src/
 import { createInitialState } from '../src/engine/state.js'
 import { createJournal, recordNode, recordEvent, addForeshadow, updateNpcStatus } from '../src/engine/journal.js'
 import { STATE_MARKER } from '../src/llm/parser.js'
+import { ROUTE, isAdjacent } from '../src/data/route.js'
 
 function 状态() {
   const s = createInitialState({
@@ -149,4 +150,34 @@ test('明确要求正文用主角的名字', () => {
   s.pc.名字 = '沈遇'
   const m = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: [] })
   assert.ok(m.includes('称呼主角'), '没告诉模型该怎么称呼主角')
+})
+
+test('user message 必须列出当前能去哪——不给的话模型只能猜', () => {
+  const s = 状态()
+  s.place = { nodeId: 'tangkou', 海拔: 1700 }
+  const m = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: [] })
+  assert.ok(m.includes('可去：火烧坡'), `没列出合法去向：${m.match(/可去：.*/)}`)
+  assert.ok(m.includes('只能填上面列出的地点'), '没约束模型只能选列出的')
+})
+
+test('有下撤点的位置要把下撤点也列进去', () => {
+  const s = 状态()
+  s.place = { nodeId: 'shuiwozi', 海拔: 3100 }
+  const 可去 = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: [] }).match(/可去：(.*)/)[1]
+  for (const 名 of ['麦秸岭', '飞机梁', '核桃坪']) {
+    assert.ok(可去.includes(名), `${名} 没列进去：${可去}`)
+  }
+})
+
+test('列出的去向必须与 isAdjacent 判定一致——两边不能各说各话', () => {
+  const s = 状态()
+  for (const nodeId of ['tangkou', 'shuiwozi', 'yingdi2800', 'baxiantai']) {
+    s.place = { nodeId, 海拔: 3000 }
+    const 可去 = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: [] }).match(/可去：(.*)/)[1]
+    for (const n of ROUTE) {
+      const 该列 = isAdjacent(nodeId, n.id)
+      const 列了 = 可去.includes(n.名称)
+      assert.equal(列了, 该列, `${nodeId} → ${n.名称}：prompt 说${列了 ? '能去' : '不能去'}，isAdjacent 说${该列 ? '能去' : '不能去'}`)
+    }
+  }
 })

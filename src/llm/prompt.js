@@ -1,4 +1,4 @@
-import { ROUTE, getNode } from '../data/route.js'
+import { ROUTE, getNode, isAdjacent } from '../data/route.js'
 import { NPCS, getNpc, PERSONALITY_TAGS } from '../data/npcs.js'
 import { GEAR, EXTRA_GEAR } from '../data/gear.js'
 import { SEASONS } from '../data/seasons.js'
@@ -127,6 +127,10 @@ export function buildUserMessage({ state, journal, 既成事实, 最近回合 })
     '【当前状态快照】',
     `  第${state.clock.day}天 ${state.clock.slot}｜${node ? node.名称 : state.place.nodeId} ${state.place.海拔}m｜${state.weather.状态}${state.weather.等级 ? state.weather.等级 + '级' : ''}｜负重 ${state.carry.当前}kg｜现金 ¥${state.money}`,
     `  在队：${在队 || '（独行）'}`,
+    // 把合法去向直接摆出来。不给的话模型只能照着 system prompt 里的完整
+    // 路线猜，猜错了被校验拦下——等于让人蒙眼投篮再判他犯规。
+    `  可去：${ROUTE.filter((n) => isAdjacent(state.place.nodeId, n.id)).map((n) => n.名称).join('、') || '（无相邻节点）'}`,
+    '  「去向建议」只能填上面列出的地点之一；原地不动就省略这个字段。',
     `  季节：${state.meta.季节}`,
   ].join('\n')
 }
