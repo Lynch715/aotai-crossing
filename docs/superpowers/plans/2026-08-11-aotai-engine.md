@@ -268,13 +268,21 @@ export const MODULE_ORDER = [
   'src/engine/rng.js',
 ]
 
-// 行首（无缩进）的 import 整行删除；行首的 export 关键字剥掉。
-// 约束见计划开头的「代码风格约束」——字符串里的同名字样因为不在行首，不受影响。
+// 只删真正的 import 语句（必须有 from 子句或裸副作用导入），
+// 只剥真正的 export 声明（后面必须跟 function/const/let/var/class）。
+//
+// 为什么不用宽松的 /^import\s/ 和 /^export\s+/：模板字符串的续行也在列 0，
+// 一旦某行以 "export 你的数据" 或 "import 一段说明" 开头就会被静默改写或整行删掉。
+// Task 15 的 system prompt 是一大段多行模板，正好是重灾区，而且测试跑的是 src/
+// 的 ESM 原文、不是拼接产物，这种损坏永远测不出来。
+const IMPORT_LINE = /^import\s+[^'"]*from\s+['"][^'"]+['"];?\s*$|^import\s+['"][^'"]+['"];?\s*$/
+const EXPORT_KEYWORD = /^export\s+(?=(async\s+)?(function|const|let|var|class)\s)/
+
 export function stripModuleSyntax(source) {
   return source
     .split('\n')
-    .filter((line) => !/^import\s/.test(line))
-    .map((line) => line.replace(/^export\s+/, ''))
+    .filter((line) => !IMPORT_LINE.test(line))
+    .map((line) => line.replace(EXPORT_KEYWORD, ''))
     .join('\n')
 }
 
