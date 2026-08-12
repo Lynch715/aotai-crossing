@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { drawCompanions, drawViewModel, MAX_REDRAW } from '../src/ui/screen-draw.js'
-import { RANDOM_POOL, getNpc } from '../src/data/npcs.js'
+import { RANDOM_POOL, getNpc, PERSONALITY_TAGS } from '../src/data/npcs.js'
 import { initialAffinity } from '../src/engine/affinity.js'
 import { makeRng } from '../src/engine/rng.js'
 
@@ -66,4 +66,14 @@ test('视图模型带出卡片所需的全部字段', () => {
 test('重抽次数用尽后不再允许重抽', () => {
   assert.equal(drawViewModel([], 0).可重抽, true)
   assert.equal(drawViewModel([], MAX_REDRAW).可重抽, false)
+})
+
+test('性格 id 打错时直接报错，而不是静默给全员基准好感', () => {
+  assert.throws(() => drawCompanions(makeRng(1), 'Renside'), /认不出的性格标签/)
+  assert.throws(() => drawCompanions(makeRng(1), 'renside '), /认不出的性格标签/)
+  assert.throws(() => drawCompanions(makeRng(1), undefined), /认不出的性格标签/)
+  // 合法标签照常
+  for (const t of PERSONALITY_TAGS) {
+    assert.equal(drawCompanions(makeRng(1), t.id).length, 2)
+  }
 })
