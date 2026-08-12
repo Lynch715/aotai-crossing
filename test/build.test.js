@@ -155,3 +155,36 @@ test('样式里不得出现会破坏 HTML 的闭合标签', () => {
   const css = readFileSync(join(ROOT_DIR, 'src/styles.css'), 'utf8')
   assert.ok(!css.includes('</style'), 'CSS 里出现 </style 会提前闭合样式块')
 })
+
+// ══════════════════════════════════════════════════════════════
+// 这一条是拿整页白屏换来的。
+//
+// 原来的「bundle 可求值」测的是 buildScript() 的直接输出，
+// 而真正送到浏览器的是 buildHtml() 里被 replace 塞进 HTML 的那份。
+// 中间这步替换没人看着——String.replace 把代码里的 $` 当成特殊记号，
+// 展开成「匹配位置之前的全部内容」，整段 CSS 被灌进脚本，语法直接崩。
+// 本地测试全绿、线上白屏，就是这么来的。
+// ══════════════════════════════════════════════════════════════
+
+function 从HTML取脚本(html) {
+  const 开 = html.indexOf('<script>') + '<script>'.length
+  const 关 = html.lastIndexOf('</script>')
+  return html.slice(开, 关)
+}
+
+test('HTML 里嵌的那份脚本才是真交付物，它必须可求值', () => {
+  const 码 = 从HTML取脚本(buildHtml())
+  assert.doesNotThrow(() => new Function(码)(), 'HTML 内嵌脚本求值失败')
+})
+
+test('嵌进 HTML 的脚本与 buildScript 逐字相同，replace 不许改动它', () => {
+  assert.equal(从HTML取脚本(buildHtml()), buildScript(),
+    'replace 把脚本改动了——多半是 $` / $\' / $& 被当成特殊记号展开')
+})
+
+test('代码里含 $` 时也不会被 replace 展开', () => {
+  // 直接复现触发条件：正则末尾的 $ 紧挨模板字符串的收尾反引号
+  const 码 = 从HTML取脚本(buildHtml())
+  assert.ok(码.includes('(.*)$`'), '前提不成立：产物里已没有 $` 序列，这条测试失去意义')
+  assert.ok(!码.includes('--bg-deep'), 'CSS 被灌进脚本了')
+})

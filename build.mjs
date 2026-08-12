@@ -94,7 +94,12 @@ export function buildHtml() {
   if (styles.includes('</style')) {
     throw new Error('src/styles.css 含 </style，会提前闭合样式块')
   }
-  return shell.replace('__STYLES__', styles).replace('__SCRIPT__', buildScript())
+  // 必须用替换函数，不能直接传字符串。String.replace 会把替换串里的
+  // $` $' $& $1 当成特殊记号展开——代码里只要出现一个 $ 紧挨反引号
+  // （比如正则 `...(.*)$` 的收尾），$` 就会把「匹配位置之前的全部内容」
+  // 也就是整段 CSS 塞进脚本里，产物直接语法错误、整页白屏。
+  // 替换函数没有这层展开。
+  return shell.replace('__STYLES__', () => styles).replace('__SCRIPT__', () => buildScript())
 }
 
 // 仅在直接执行时写盘，被 import 时不产生副作用
