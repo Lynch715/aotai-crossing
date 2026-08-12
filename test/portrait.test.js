@@ -22,7 +22,7 @@ test('12 个人的色相拉得开，不会看起来都一样', () => {
   const 色相 = NPCS.map((n) => portraitTheme(n.id).色相).sort((a, b) => a - b)
   let 最小间隔 = 360
   for (let i = 1; i < 色相.length; i++) 最小间隔 = Math.min(最小间隔, 色相[i] - 色相[i - 1])
-  assert.ok(最小间隔 >= 8, `有两人色相只差 ${最小间隔} 度，肉眼分不出`)
+  assert.ok(最小间隔 >= 25, `有两人色相只差 ${最小间隔} 度——22% 饱和度下那就是两块一样的暗色，肉眼分不出`)
 })
 
 test('生成的是合法 SVG 且不含可执行内容', () => {
@@ -42,4 +42,11 @@ test('主角用性别加种子，不与任何 NPC 撞', () => {
   const 男 = portraitTheme('pc:男:7')
   const 女 = portraitTheme('pc:女:7')
   assert.notEqual(男.色相, 女.色相)
+})
+
+test('主角男女的渐变 id 不会撞车', () => {
+  const 取id = (svg) => svg.match(/id="([^"]+)"/)[1]
+  const 男 = 取id(portraitSvg('pc:男:7'))
+  const 女 = 取id(portraitSvg('pc:女:7'))
+  assert.notEqual(男, 女, '两张立绘共用同一个渐变，后渲染的会顶掉前一个')
 })
