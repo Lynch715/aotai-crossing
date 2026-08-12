@@ -4464,6 +4464,7 @@ Expected: FAIL — 模块不存在
 
 ```js
 import { snapshot, restore } from './engine/state.js'
+import { makeRng } from './engine/rng.js'
 import { judgeOption } from './engine/threshold.js'
 import { applyStepCost, advanceSlot, dailyUpkeep } from './engine/consume.js'
 import { applyAffinityDelta } from './engine/affinity.js'
@@ -4478,11 +4479,12 @@ import { streamChat } from './llm/client.js'
 export const MAX_REPAIR = 2
 
 // 尾段彻底解析不出来时的兜底选项。宁可玩法单调，也不能让游戏卡死。
+// 字段与正常选项同形：UI 渲染和回传 选中项 时不必区分两种形状。
 export const FALLBACK_OPTIONS = [
-  { id: 'A', 文本: '继续按原计划前进' },
-  { id: 'B', 文本: '原地休整，恢复体力' },
-  { id: 'C', 文本: '找同伴聊两句' },
-  { id: 'D', 文本: '清点装备和剩余补给' },
+  { id: 'A', 文本: '继续按原计划前进', 类型: '徒步', require: {}, cost: {} },
+  { id: 'B', 文本: '原地休整，恢复体力', 类型: '徒步', require: {}, cost: {} },
+  { id: 'C', 文本: '找同伴聊两句', 类型: '社交', require: {}, cost: {} },
+  { id: 'D', 文本: '清点装备和剩余补给', 类型: '徒步', require: {}, cost: {} },
 ]
 
 function 就地覆盖(target, source) {
@@ -4514,7 +4516,10 @@ export async function runTurn({
     const { cost: 净代价 } = clampCost(选中项.cost)
     选中项 = { ...选中项, require: 净门槛, cost: 净代价 }
 
-    const 判定 = judgeOption(选中项, state, rng || (() => 0.5))
+    // rng 缺省时按存档种子推导，而不是退化成恒定 0.5。
+    // spec 承诺「同一存档重放结果一致」，一个常量默认值会让这条承诺静默失效，
+    // 而且失效得毫无声响——调用方永远不会发现自己忘了传。
+    const 判定 = judgeOption(选中项, state, rng || makeRng(state.meta.随机种子))
     const 体力前 = state.pc.体力
     const 日前 = state.clock.day
 
@@ -4589,7 +4594,9 @@ export async function runTurn({
       recordNode(journal, v.去向)
     }
     if (parsed.state.天气建议) {
-      state.weather = { 状态: String(parsed.state.天气建议), 等级: state.weather.等级 }
+      // 这是唯一不经 validateProposal 的 LLM 字段（纯展示、不参与任何判定），
+      // 但仍要截断——模型偶尔会把整段天气描写塞进来。
+      state.weather = { 状态: String(parsed.state.天气建议).slice(0, 40), 等级: state.weather.等级 }
     }
 
     // LLM 申报的门槛挂回选项上，供下回合判定与置灰使用
@@ -4880,3 +4887,47 @@ git commit -m "feat: 端到端冒烟脚本与真实响应 fixture"
 
 存档 `persist` → 立绘占位 `portraits` → API 配置界面 → 捏人 → 抽卡 → 商店 → 主界面 → 结局页 → 单文件交付与 base64 烘焙 → 12 份 NPC 生图 prompt。
 
+
+---
+
+## 交接给计划二的待办（来自分支整体评审）
+
+计划一的核心契约是成立的：判定先行、LLM 输出必过 `validateProposal`、失败整体回滚。以下是**引擎有意留白或确实缺失**的部分，计划二开工前应先处理前三条。
+
+### 必须处理
+
+**1. `state.flags.失温连败` 从来没人增加它 —— 那条结局是死代码**
+
+`ending.js` 会读 `失温连败 >= 3` 判「失败遇险」，但计划一没有任何模块写这个字段。测试是手工把它设成 3 来验条件分支的，**通往那里的路并不存在**。
+
+缺的是温度机制：`sleep()` 目前完全不看气温，也不看睡袋温标。要让这条结局活过来，需要在 `sleep()` 里比对 `SEASONS[季节].夜间温度` 与「睡袋温标 − 内胆加成」，不够暖就 `失温连败++`，够暖则归零。所有数据都在，只差接线。
+
+**2. NPC 的 `在队` 与 `状态` 引擎不维护，UI 必须自己管**
+
+`state.party[].在队` 初始化为 `true` 后永不改变；`state.party[].状态` 永远是 `'正常'`。当 LLM 叙述「王大鹏膝伤下撤了」，UI 必须自己把 `在队` 置 false——否则好感门槛仍会为一个已经离队的人放行，玩家会看到对着空气搭话的选项。
+
+注意这里有**两套人物状态**：`state.party[].状态`（进 user message 的状态快照）和 `journal.人物状态`（进旅程档案，由 `updateNpcStatus` 维护）。两者都要更新，目前没有任何地方写明这件事。
+
+**3. `state.weather.等级` 是个孤儿字段**
+
+初始化为 1 后没有任何写入方。LLM 的 `天气建议` 只改 `状态`（描述文字）。`sleep()` 的 `恶劣天气` 参数需要调用方自己判断，而「什么算恶劣」没有定义。要么给 `等级` 接上写入逻辑并让 `stepStaminaCost` / `sleep` 读它，要么就把它删掉——留着一个不起作用的字段只会误导人。
+
+### 数据里写了效果、引擎没实现的装备
+
+以下 `EXTRA_GEAR` 的 `作用` 描述听起来像机制，实际只是给 LLM 看的叙事钩子。**最危险的是 `bag_liner`**：它有 `温标加成: 5` 这个货真价实的数值字段，`seasons.js` 的采购警告会用它，但 `sleep()` 根本不读——玩家照着警告买了内胆，睡眠回复一点没变。
+
+| 物资 | 数据里写的 | 引擎实际 |
+|---|---|---|
+| `bag_liner` | 温标加成 5 | 只影响采购警告，不影响睡眠 |
+| `down_jacket` | 夜间体力回复加成 | 无 |
+| `knee_brace` / `spare_socks` | 伤病 / 失温抵抗 | 无 |
+| `camera` / `tripod` / `booze_snacks` / `spare_meds` | 好感加成 | 无 |
+| `trekking_poles` / `camp_stool` | 体力 −1 / 休整 +2 | **已接线** |
+
+计划二要么补上接线，要么把这些 `作用` 改写成明确的叙事提示，别让它读起来像承诺。
+
+### 其它
+
+- `rollInt` 至今没有任何生产代码调用，只在测试和构建探针里用。留着无害，但要知道它是死导出。
+- 流中途断开时 `streamChat` 只是正常返回已收到的文本，**引擎分不清「正常结束」和「被截断」**。spec 第 9 节写的「提供续写按钮」需要先有截断检测。
+- 「上下文超限时最近回合由 3 降 1」没有自动化，`prompt.js` 固定 `slice(-3)`，降级要调用方自己决定。

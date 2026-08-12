@@ -1,4 +1,5 @@
 import { snapshot, restore } from './engine/state.js'
+import { makeRng } from './engine/rng.js'
 import { judgeOption } from './engine/threshold.js'
 import { applyStepCost, advanceSlot, dailyUpkeep } from './engine/consume.js'
 import { applyAffinityDelta } from './engine/affinity.js'
@@ -13,11 +14,12 @@ import { streamChat } from './llm/client.js'
 export const MAX_REPAIR = 2
 
 // 尾段彻底解析不出来时的兜底选项。宁可玩法单调，也不能让游戏卡死。
+// 字段与正常选项同形：UI 渲染和回传 选中项 时不必区分两种形状。
 export const FALLBACK_OPTIONS = [
-  { id: 'A', 文本: '继续按原计划前进' },
-  { id: 'B', 文本: '原地休整，恢复体力' },
-  { id: 'C', 文本: '找同伴聊两句' },
-  { id: 'D', 文本: '清点装备和剩余补给' },
+  { id: 'A', 文本: '继续按原计划前进', 类型: '徒步', require: {}, cost: {} },
+  { id: 'B', 文本: '原地休整，恢复体力', 类型: '徒步', require: {}, cost: {} },
+  { id: 'C', 文本: '找同伴聊两句', 类型: '社交', require: {}, cost: {} },
+  { id: 'D', 文本: '清点装备和剩余补给', 类型: '徒步', require: {}, cost: {} },
 ]
 
 function 就地覆盖(target, source) {
@@ -49,7 +51,10 @@ export async function runTurn({
     const { cost: 净代价 } = clampCost(选中项.cost)
     选中项 = { ...选中项, require: 净门槛, cost: 净代价 }
 
-    const 判定 = judgeOption(选中项, state, rng || (() => 0.5))
+    // rng 缺省时按存档种子推导，而不是退化成恒定 0.5。
+    // spec 承诺「同一存档重放结果一致」，一个常量默认值会让这条承诺静默失效，
+    // 而且失效得毫无声响——调用方永远不会发现自己忘了传。
+    const 判定 = judgeOption(选中项, state, rng || makeRng(state.meta.随机种子))
     const 体力前 = state.pc.体力
     const 日前 = state.clock.day
 
@@ -124,7 +129,9 @@ export async function runTurn({
       recordNode(journal, v.去向)
     }
     if (parsed.state.天气建议) {
-      state.weather = { 状态: String(parsed.state.天气建议), 等级: state.weather.等级 }
+      // 这是唯一不经 validateProposal 的 LLM 字段（纯展示、不参与任何判定），
+      // 但仍要截断——模型偶尔会把整段天气描写塞进来。
+      state.weather = { 状态: String(parsed.state.天气建议).slice(0, 40), 等级: state.weather.等级 }
     }
 
     // LLM 申报的门槛挂回选项上，供下回合判定与置灰使用

@@ -273,3 +273,36 @@ test('选项门槛在判定前会被重新夹取，不靠调用方自觉', async
   // 夹到 30 后差距只有 -8（已达标），而非 4962
   assert.equal(r.判定.gap, 0, `门槛没被重夹，gap = ${r.判定.gap}`)
 })
+
+test('不传 rng 也必须按存档种子复现，而不是退化成恒定 0.5', async () => {
+  const 跑一局 = async (种子) => {
+    const st = 局面()
+    st.meta.随机种子 = 种子
+    st.pc.户外经验 = 38
+    return runTurn({
+      state: st, journal: createJournal(),
+      // 门槛 43 → 差距 5 → 成功率 0.62，正好落在掷骰档
+      选中项: { id: 'A', 文本: '试试', 类型: '徒步', require: { 经验: 43 }, cost: {} },
+      config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+      streamImpl: async () => ({ text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{}' }),
+    })
+  }
+  // 同种子两次，结果必须一致
+  const a1 = await 跑一局(11)
+  const a2 = await 跑一局(11)
+  assert.equal(a1.判定.roll, a2.判定.roll, '同种子掷骰不一致')
+
+  // 不同种子应当掷出不同的点数——若默认值是常量 0.5，这里会相等
+  const 点数 = new Set()
+  for (const 种子 of [1, 2, 3, 4, 5, 6, 7, 8]) 点数.add((await 跑一局(种子)).判定.roll)
+  assert.ok(点数.size > 1, `八个不同种子掷出同一个点数 ${[...点数]}，rng 默认值退化了`)
+})
+
+test('兜底选项与正常选项同形，UI 不必区分两种形状', () => {
+  for (const o of FALLBACK_OPTIONS) {
+    assert.ok(o.id && o.文本, '缺 id 或文本')
+    assert.ok(o.类型, `${o.id} 缺类型`)
+    assert.deepEqual(o.require, {}, `${o.id} 的 require 应为空对象而非 undefined`)
+    assert.deepEqual(o.cost, {}, `${o.id} 的 cost 应为空对象而非 undefined`)
+  }
+})

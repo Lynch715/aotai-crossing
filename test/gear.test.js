@@ -1,6 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { GEAR, EXTRA_GEAR, ALL_GEAR, getGear, tierOf, midTierLoadout } from '../src/data/gear.js'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 test('原表 21 项，扩充 25 项', () => {
   assert.equal(GEAR.length, 21)
@@ -80,4 +83,17 @@ test('tierOf 按档名取档，取不到返回 undefined', () => {
 test('季节专属物资标了适用季节', () => {
   assert.deepEqual(getGear('crampons').季节, ['春季', '冬季'])
   assert.deepEqual(getGear('mosquito_repellent').季节, ['夏季'])
+})
+
+// source-fidelity.test.js 扫不到 gear.js——EXTRA_GEAR 的 25 个名称与全部 作用
+// 都是自造的，全量比对会产出六十多条豁免，噪音盖过信号。这里只钉原表 21 项。
+test('原表 21 项名称与源文档逐字一致', () => {
+  const 根 = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const 源文 = readFileSync(join(根, 'test/fixtures/source-text.txt'), 'utf8')
+  // 计划把源文档的半角括号统一成了全角，比对前归一化
+  const 归一 = (x) => x.replace(/（/g, '(').replace(/）/g, ')').replace(/\s+/g, '')
+  const 源文归一 = 归一(源文)
+
+  const 走失 = GEAR.filter((g) => !源文归一.includes(归一(g.名称))).map((g) => g.名称)
+  assert.deepEqual(走失, [], `以下原表装备名在源文档中找不到对应：\n  ${走失.join('\n  ')}`)
 })
