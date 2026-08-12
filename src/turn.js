@@ -135,8 +135,11 @@ export async function runTurn({
     if (parsed.state.天气建议) {
       // 这是唯一不经 validateProposal 的 LLM 字段（纯展示、不参与任何判定），
       // 但仍要截断——模型偶尔会把整段天气描写塞进来。
-      const 描述 = String(parsed.state.天气建议).slice(0, 40)
-      state.weather = { 状态: 描述, 等级: weatherLevel(描述) }
+      // 先按完整描述解析等级，再截断显示文本。反过来的话，模型写了长句时
+      // 关键词会被切掉——「…傍晚可能暴风雪」截到 40 字只剩「多云」，
+      // 9 级暴风雪静默降成 2 级，没有任何报错。
+      const 全文 = String(parsed.state.天气建议)
+      state.weather = { 状态: 全文.slice(0, 40), 等级: weatherLevel(全文) }
     }
 
     // LLM 申报的门槛挂回选项上，供下回合判定与置灰使用

@@ -698,7 +698,9 @@ const WEATHER_LEVELS = [
   [6, ['大风', '强风', '降雪', '雨夹雪']],
   [5, ['小雨', '阵雨', '霜冻']],
   [4, ['雾', '阴沉', '低云']],
-  [3, ['阴', '转阴']],
+  // 注意 tier 3 用「阴天」而非「阴」：多云转阴 含「阴」，取最高会得 3，
+  // 与「多云转阴 = 2」的断言直接矛盾。关键词要选不会被上层短语包含的写法。
+  [3, ['阴天', '转阴天']],
   [2, ['多云', '微风']],
   [1, ['晴', '无风', '晴朗']],
 ]
@@ -739,8 +741,11 @@ import { validateProposal, clampRequire, clampCost, weatherLevel } from './llm/v
     if (parsed.state.天气建议) {
       // 这是唯一不经 validateProposal 的 LLM 字段（纯展示、不参与任何判定），
       // 但仍要截断——模型偶尔会把整段天气描写塞进来。
-      const 描述 = String(parsed.state.天气建议).slice(0, 40)
-      state.weather = { 状态: 描述, 等级: weatherLevel(描述) }
+      // 先按完整描述解析等级，再截断显示文本。反过来的话，模型写了长句时
+      // 关键词会被切掉——「…傍晚可能暴风雪」截到 40 字只剩「多云」，
+      // 9 级暴风雪静默降成 2 级，没有任何报错。
+      const 全文 = String(parsed.state.天气建议)
+      state.weather = { 状态: 全文.slice(0, 40), 等级: weatherLevel(全文) }
     }
 ```
 

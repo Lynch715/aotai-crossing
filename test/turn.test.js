@@ -356,3 +356,19 @@ test('LLM 提的天气会解析出等级，不再是孤儿字段', async () => {
   assert.equal(r.ok, true)
   assert.equal(s.weather.等级, 9, `暴风雪应为 9 级，实为 ${s.weather.等级}`)
 })
+
+test('长天气描述先解析等级再截断，关键词不会被切掉', async () => {
+  const s = 局面()
+  // 44 字，关键词「暴风雪」在第 41 字——先截断再解析会静默降成 2 级
+  const 长句 = '今日天气多云间晴，气温适宜，风力较小，较为舒适，请注意防晒并携带足够饮水，傍晚可能暴风雪'
+  await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({
+      text: `[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{"天气建议":"${长句}"}`,
+    }),
+  })
+  assert.equal(s.weather.等级, 9, `等级被静默降级：${s.weather.等级}`)
+  assert.ok(s.weather.状态.length <= 40, '显示文本仍应截断')
+})
