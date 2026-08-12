@@ -7,6 +7,7 @@ const ROOT = dirname(fileURLToPath(import.meta.url))
 // 拓扑顺序：被依赖者在前。新增模块必须手动登记在此。
 export const MODULE_ORDER = [
   'src/data/route.js',
+  'src/data/npcs.js',
   'src/engine/rng.js',
 ]
 
