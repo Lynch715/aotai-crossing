@@ -3,6 +3,7 @@ import { makeRng } from './engine/rng.js'
 import { judgeOption } from './engine/threshold.js'
 import { applyStepCost, advanceSlot, dailyUpkeep } from './engine/consume.js'
 import { applyAffinityDelta } from './engine/affinity.js'
+import { npcLeaves } from './engine/party.js'
 import { checkEnding, applyEnding } from './engine/ending.js'
 import { recordNode, recordEvent, addForeshadow, resolveForeshadow, compressJournal } from './engine/journal.js'
 import { getNode } from './data/route.js'
@@ -119,6 +120,9 @@ export async function runTurn({
     结果.warnings.push(...v.warnings)
 
     for (const c of v.好感变更) applyAffinityDelta(state, c.npcId, c.delta, { 重大: c.重大 })
+    for (const 离 of v.离队) {
+      npcLeaves(state, journal, 离.npcId, 离.因)
+    }
     for (const m of v.记忆) recordEvent(journal, state.clock, m)
     for (const f of v.伏笔.新增) addForeshadow(journal, f)
     for (const f of v.伏笔.已收) resolveForeshadow(journal, f)

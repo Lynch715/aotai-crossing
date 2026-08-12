@@ -103,7 +103,7 @@ export function clampRequire(类型, require) {
 
 // 把 LLM 的 STATE 提议过一遍筛子。所有越权都记 warning，但不打断——游戏要能继续。
 export function validateProposal(state, proposal) {
-  const out = { 好感变更: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
+  const out = { 好感变更: [], 离队: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return out
   // 「从不抛异常」得对 state 也成立，否则调用方传进半截状态时一样白屏。
   const 队伍 = Array.isArray(state?.party) ? state.party : []
@@ -125,6 +125,27 @@ export function validateProposal(state, proposal) {
       continue
     }
     out.好感变更.push({ npcId, delta: item.delta, 重大: item.重大 === true, 因: item.因 || '' })
+  }
+
+  // 离队。没有这一段，模型只能在正文里叙述某人下撤，引擎永远不知道——
+  // 下一回合玩家照样能对着他搭话，好感门槛照样为他放行。
+  for (const item of Array.isArray(proposal.离队) ? proposal.离队 : []) {
+    if (!item || typeof item !== 'object') continue
+    const npcId = resolveNpc(item.npc)
+    if (!npcId) {
+      out.warnings.push(`离队提议里认不出这个人：${item.npc}`)
+      continue
+    }
+    const 同伴 = 队伍.find((p) => p.npcId === npcId)
+    if (!同伴) {
+      out.warnings.push(`${item.npc} 本就不在队伍里，忽略离队提议`)
+      continue
+    }
+    if (!同伴.在队) {
+      out.warnings.push(`${item.npc} 已经离队，忽略重复提议`)
+      continue
+    }
+    out.离队.push({ npcId, 因: String(item.因 || '离队').slice(0, 30) })
   }
 
   for (const m of Array.isArray(proposal.记忆) ? proposal.记忆 : []) {

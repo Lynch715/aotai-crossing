@@ -4,6 +4,7 @@ import { runTurn, FALLBACK_OPTIONS, MAX_REPAIR } from '../src/turn.js'
 import { createInitialState } from '../src/engine/state.js'
 import { createJournal } from '../src/engine/journal.js'
 import { STATE_MARKER } from '../src/llm/parser.js'
+import { gapFor, UNREACHABLE } from '../src/engine/threshold.js'
 
 function 局面() {
   const s = createInitialState({
@@ -305,4 +306,39 @@ test('兜底选项与正常选项同形，UI 不必区分两种形状', () => {
     assert.deepEqual(o.require, {}, `${o.id} 的 require 应为空对象而非 undefined`)
     assert.deepEqual(o.cost, {}, `${o.id} 的 cost 应为空对象而非 undefined`)
   }
+})
+
+test('模型报了离队，引擎真的让人离队', async () => {
+  const s = 局面()
+  const j = createJournal()
+  const r = await runTurn({
+    state: s, journal: j,
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({
+      text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{"离队":[{"npc":"陈岩","因":"膝伤下撤"}]}',
+    }),
+  })
+  assert.equal(r.ok, true)
+  const 陈 = s.party.find((p) => p.npcId === 'chenyan')
+  assert.equal(陈.在队, false, '模型说他走了，引擎却没让他走')
+  assert.equal(陈.状态, '膝伤下撤')
+})
+
+test('离队后好感门槛不再为他放行', async () => {
+  const s = 局面()
+  // 陈岩初始好感 45，门槛 40 本该达标
+  const { gap: 离队前 } = gapFor({ 好感: { chenyan: 40 } }, s)
+  assert.equal(离队前, 0)
+
+  await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({
+      text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{"离队":[{"npc":"陈岩","因":"下撤"}]}',
+    }),
+  })
+  const { gap: 离队后 } = gapFor({ 好感: { chenyan: 40 } }, s)
+  assert.equal(离队后, UNREACHABLE, '人都走了，门槛还放行')
 })

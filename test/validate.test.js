@@ -181,3 +181,53 @@ test('validateProposal 从不抛异常', () => {
     assert.doesNotThrow(() => validateProposal(状态(), p), JSON.stringify(p))
   }
 })
+
+function 局面() {
+  return {
+    place: { nodeId: 'maijieling', 海拔: 3500 },
+    party: [
+      { npcId: 'chenyan', 好感: 45, 在队: true },
+      { npcId: 'wangdapeng', 好感: 30, 在队: true },
+    ],
+    pack: [],
+  }
+}
+
+test('离队提议按名字解析，写进 离队', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '王大鹏', 因: '膝伤严重，从水窝子下撤' }] })
+  assert.equal(r.离队.length, 1)
+  assert.equal(r.离队[0].npcId, 'wangdapeng')
+  assert.ok(r.离队[0].因.includes('膝伤'))
+})
+
+test('认不出的人不当离队处理，记 warning', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '张三丰', 因: 'x' }] })
+  assert.deepEqual(r.离队, [])
+  assert.ok(r.warnings.some((w) => w.includes('张三丰')))
+})
+
+test('本就不在队伍里的人不能被离队', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '踏雪', 因: 'x' }] })
+  assert.deepEqual(r.离队, [])
+  assert.ok(r.warnings.length > 0)
+})
+
+test('已经离队的人不会被重复处理', () => {
+  const s = 局面()
+  s.party.find((p) => p.npcId === 'chenyan').在队 = false
+  const r = validateProposal(s, { 离队: [{ npc: '陈岩', 因: '又走一次' }] })
+  assert.deepEqual(r.离队, [])
+})
+
+test('离队原因过长会被截断', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '陈岩', 因: '啊'.repeat(200) }] })
+  assert.ok(r.离队[0].因.length <= 30, `没截断：${r.离队[0].因.length}`)
+})
+
+test('没有离队字段时 离队 是空数组而不是 undefined', () => {
+  assert.deepEqual(validateProposal(局面(), {}).离队, [])
+})
