@@ -42,6 +42,13 @@ test('文档原文照搬：踏雪与猛蛇过江保留事迹结局', () => {
   assert.ok(getNpc('mengshe').事迹.includes('64小时'))
 })
 
+test('猛蛇过江事迹保留源文档的弯引号', () => {
+  // 曾被实现者悄悄转成直引号；源文档用的是 U+201C / U+201D
+  const 事迹 = getNpc('mengshe').事迹
+  assert.ok(事迹.includes('\u201c驴友引路\u201d'), '弯引号丢失，被转成了直引号')
+  assert.ok(!事迹.includes('"驴友引路"'), '出现直引号')
+})
+
 test('开局带伤的三人状态与文档一致', () => {
   assert.equal(getNpc('wangdapeng').状态, '膝盖旧伤复发')
   assert.equal(getNpc('zhoutao').状态, '脚踝扭伤')
