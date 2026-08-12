@@ -1085,6 +1085,15 @@ test('睡袋温标不足会报警告', () => {
   assert.ok(!gearWarnings('夏季', ['sleeping_bag']).some((x) => x.includes('温标')))
 })
 
+test('睡袋温标从 gear.js 读取，不是硬编码', () => {
+  // 冬季夜间 -25℃：睡袋 -10℃ 不够，加内胆后 -15℃ 仍不够，
+  // 但警告文案里的数字必须随 gear.js 的数据变化，否则说明被写死了
+  const 无内胆 = gearWarnings('冬季', ['sleeping_bag']).find((x) => x.includes('温标'))
+  const 有内胆 = gearWarnings('冬季', ['sleeping_bag', 'bag_liner']).find((x) => x.includes('温标'))
+  assert.ok(无内胆.includes('-10℃'), `无内胆文案: ${无内胆}`)
+  assert.ok(有内胆.includes('-15℃'), `有内胆文案: ${有内胆}`)
+})
+
 test('getSeason 取不到返回 undefined', () => {
   assert.equal(getSeason('雨季'), undefined)
 })
@@ -1100,6 +1109,8 @@ Expected: FAIL — 模块不存在
 `src/data/seasons.js`。风险与推荐准备逐条照搬文档「四季穿越鳌太线风险对比」表：
 
 ```js
+import { getGear } from './gear.js'
+
 // 四季风险。主要风险/次要风险/推荐准备逐条照搬文档表格。
 // 夜间温度为设计新增，用于判断睡袋温标是否够用。
 export const SEASONS = [
@@ -1151,9 +1162,13 @@ export function gearWarnings(seasonId, ownedIds) {
     警告.push('夏季蚊虫叮咬频繁，未带防蚊液。')
   }
 
-  if (owned.has('sleeping_bag')) {
-    // 睡袋标称温标 -10℃，内胆再加 5℃
-    const 实际温标 = -10 + (owned.has('bag_liner') ? -5 : 0)
+  // 温标一律从 gear.js 读，不在这里硬编码——否则改了装备表，警告还按老值算，
+  // 而且没有任何测试会报错。温标越低越保暖；内胆的「温标加成」是保暖增量，
+  // 所以从睡袋温标里再减去它。
+  const 睡袋 = owned.has('sleeping_bag') ? getGear('sleeping_bag') : undefined
+  if (睡袋) {
+    const 加成 = owned.has('bag_liner') ? (getGear('bag_liner')?.温标加成 ?? 0) : 0
+    const 实际温标 = 睡袋.温标 - 加成
     if (season.夜间温度 < 实际温标) {
       警告.push(`${season.名称}夜间约 ${season.夜间温度}℃，睡袋温标 ${实际温标}℃ 不够用，夜里会冷醒甚至失温。`)
     }
@@ -1166,7 +1181,7 @@ export function gearWarnings(seasonId, ownedIds) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/seasons.test.js`
-Expected: PASS，9 个测试全绿
+Expected: PASS，10 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序**
 
