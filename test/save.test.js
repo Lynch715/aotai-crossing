@@ -97,3 +97,19 @@ test('迁移：高于当前版本的存档拒绝加载，而不是硬吃', () =>
   assert.equal(r.可用, false)
   assert.ok(r.原因.includes('版本'))
 })
+
+test('存储写不进去时返回 false，而不是谎报成功', () => {
+  const 满了 = {
+    getItem: () => null,
+    setItem: () => { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e },
+    removeItem: () => {},
+  }
+  const { state, journal } = 局面()
+  assert.equal(writeSave(满了, 'slot1', state, journal), false)
+})
+
+test('正常存储仍返回 true', () => {
+  const st = 假存储()
+  const { state, journal } = 局面()
+  assert.equal(writeSave(st, 'slot1', state, journal), true)
+})

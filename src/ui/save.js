@@ -49,8 +49,14 @@ export function migrateSave(包) {
 }
 
 export function writeSave(storage, slotId, state, journal) {
-  storage.setItem(saveKey(slotId), packSave(state, journal))
-  return true
+  try {
+    storage.setItem(saveKey(slotId), packSave(state, journal))
+    return true
+  } catch (err) {
+    // 配额满时 setItem 抛 QuotaExceededError。无条件返回 true 是撒谎——
+    // 调用方以为存上了，玩家的一整趟就这么没了。返回 false 让 UI 能报出来。
+    return false
+  }
 }
 
 export function readSave(storage, slotId) {
