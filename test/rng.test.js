@@ -13,7 +13,17 @@ test('同一种子产出同一序列', () => {
 test('不同种子产出不同序列', () => {
   const a = makeRng(1)
   const b = makeRng(2)
-  assert.notEqual(a(), b())
+  assert.notDeepEqual([a(), a(), a()], [b(), b(), b()])
+})
+
+test('种子 0 产出有效且可复现', () => {
+  const a = makeRng(0)
+  const b = makeRng(0)
+  const seqA = [a(), a(), a(), a(), a()]
+  const seqB = [b(), b(), b(), b(), b()]
+  assert.deepEqual(seqA, seqB)
+  assert.ok(seqA.every((v) => v >= 0 && v < 1))
+  assert.ok(new Set(seqA).size > 1, '序列退化：所有值相同')
 })
 
 test('产出值落在 [0, 1)', () => {
