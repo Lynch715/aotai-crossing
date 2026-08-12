@@ -62,6 +62,17 @@ test('睡袋温标从 gear.js 读取，不是硬编码', () => {
   assert.ok(有内胆.includes('-15℃'), `有内胆文案: ${有内胆}`)
 })
 
+test('压根没带睡袋要报警，只买内胆不算带了睡袋', () => {
+  // 秋季原本只有一条通用求救警告，没带睡袋应当也提醒
+  assert.ok(gearWarnings('秋季', ['gps']).some((x) => x.includes('没带睡袋')))
+  // 内胆不能单独用
+  assert.ok(gearWarnings('冬季', ['bag_liner']).some((x) => x.includes('没带睡袋')))
+  // 夏季夜间 5℃，不报
+  assert.ok(!gearWarnings('夏季', []).some((x) => x.includes('没带睡袋')))
+  // 带了睡袋就走温标那条，不再报「没带」
+  assert.ok(!gearWarnings('冬季', ['sleeping_bag']).some((x) => x.includes('没带睡袋')))
+})
+
 test('getSeason 取不到返回 undefined', () => {
   assert.equal(getSeason('雨季'), undefined)
 })

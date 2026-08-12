@@ -541,7 +541,7 @@ export function isAdjacent(fromId, toId) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/route.test.js`
-Expected: PASS，10 个测试全绿
+Expected: PASS，11 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序**
 
@@ -1166,7 +1166,12 @@ export function gearWarnings(seasonId, ownedIds) {
   // 而且没有任何测试会报错。温标越低越保暖；内胆的「温标加成」是保暖增量，
   // 所以从睡袋温标里再减去它。
   const 睡袋 = owned.has('sleeping_bag') ? getGear('sleeping_bag') : undefined
-  if (睡袋) {
+  if (!睡袋) {
+    // 压根没带睡袋。只买内胆不买睡袋也走这条——内胆不能单独用。
+    if (season.夜间温度 < 0) {
+      警告.push(`${season.名称}夜间约 ${season.夜间温度}℃，没带睡袋，夜里根本扛不住。`)
+    }
+  } else {
     const 加成 = owned.has('bag_liner') ? (getGear('bag_liner')?.温标加成 ?? 0) : 0
     const 实际温标 = 睡袋.温标 - 加成
     if (season.夜间温度 < 实际温标) {
@@ -1181,7 +1186,7 @@ export function gearWarnings(seasonId, ownedIds) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/seasons.test.js`
-Expected: PASS，10 个测试全绿
+Expected: PASS，11 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序**
 
