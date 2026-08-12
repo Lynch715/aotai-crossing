@@ -2665,8 +2665,17 @@ export function resolveForeshadow(journal, 文本) {
   return true
 }
 
+// 状态词只收文字描述。裸数值与「好感」字样一律拒收——
+// 这不是防调用方手滑，而是因为它守的是文档最硬的一条约束：
+// 给 LLM 精确数值，它就会在对话里漏出来（禁止开天眼）。
+// 精确匹配而非见数字就拦，是为了放行「膝伤第2天」这类正当描述。
+const 档案泄漏字样 = /好感/
+const 档案纯数值 = /^\s*\d{1,3}\s*(\/\s*100)?\s*$/
+
 export function updateNpcStatus(journal, npcId, 状态) {
-  journal.人物状态[npcId] = 状态
+  const t = String(状态 ?? '').trim()
+  if (!t || 档案泄漏字样.test(t) || 档案纯数值.test(t)) return journal
+  journal.人物状态[npcId] = t
   return journal
 }
 
@@ -2712,7 +2721,7 @@ export function renderJournal(journal) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/journal.test.js`
-Expected: PASS，16 个测试全绿。特别确认「绝不泄漏数字好感」那条——它守的是文档最硬的一条约束。
+Expected: PASS，16 个测试全绿（计划正文原写 16，代码块实为 15 条，加守卫测试后正好 16）。特别确认「绝不泄漏数字好感」那条——它守的是文档最硬的一条约束。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 

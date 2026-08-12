@@ -128,6 +128,21 @@ test('渲染绝不泄漏数字好感（文档禁止 LLM 开天眼）', () => {
   assert.ok(!/\b\d{1,3}\s*\/\s*100\b/.test(out), '渲染结果不该出现百分制数值')
 })
 
+test('档案拒收裸数值与好感字样的状态词', () => {
+  const j = createJournal()
+  updateNpcStatus(j, 'linxiaoya', '62')
+  updateNpcStatus(j, 'chenyan', '62/100')
+  updateNpcStatus(j, 'wangdapeng', '好感很高')
+  assert.deepEqual(j.人物状态, {}, '这三种都该被拒收')
+
+  // 正当描述照收，含数字也不误伤
+  updateNpcStatus(j, 'zhoutao', '膝伤第2天')
+  assert.equal(j.人物状态.zhoutao, '膝伤第2天')
+
+  const out = renderJournal(j)
+  assert.ok(!/62/.test(out), '裸数值不该出现在发给 LLM 的档案里')
+})
+
 test('空档案也能渲染，不炸', () => {
   const out = renderJournal(createJournal())
   assert.equal(typeof out, 'string')
