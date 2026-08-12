@@ -1,4 +1,5 @@
 // 准备阶段流程串联：配置 API → 捏人 → 掷季节（公示）→ 抽卡 → 采购 → 出发
+// 徒步回合：点选项 → 调 LLM → 打字机上屏 → 刷新面板 → 结局页
 // 这一层只做渲染——读视图模型、写 DOM。判断逻辑全在视图模型里。
 // 铁律：动态数据绝不拼进 innerHTML。（见 test/dom.test.js 的护栏）
 
@@ -9,12 +10,16 @@ import { loadConfig, saveConfig, configViewModel } from './config.js'
 import { createViewModel, randomDraft, deriveExperience } from './screen-create.js'
 import { drawCompanions, drawViewModel } from './screen-draw.js'
 import { shopViewModel, toggleItem, setTier, recommendedCart, START_MONEY } from './screen-shop.js'
+import { gameViewModel, panelViewModel } from './screen-game.js'
+import { endingViewModel } from './screen-ending.js'
+import { createTypewriter, splitParagraphs } from './prose.js'
 import { rollSeason, getSeason } from '../data/seasons.js'
 import { getNpc } from '../data/npcs.js'
 import { makeRng } from '../engine/rng.js'
 import { createInitialState } from '../engine/state.js'
 import { createJournal } from '../engine/journal.js'
-import { writeSave } from './save.js'
+import { writeSave, readSave } from './save.js'
+import { runTurn } from '../turn.js'
 
 // 会话状态：出发前的全部中间产物。这不是游戏状态——游戏状态在出发时才由
 // createInitialState 生成并写档。
@@ -26,6 +31,15 @@ const APP会话 = {
   队友: [],
   已重抽: 0,
   cart: {},
+  // 以下字段在出发后填入，游戏循环使用
+  state: null,
+  journal: null,
+  // 最近若干回合的摘要，供 LLM 获取上下文。
+  // 格式：[{ 标题, 剧情摘要, 选项, 判定 }]
+  // 说明见文末「调查点 1」注释。存档只含 state+journal，正文不存；
+  // 页面刷新后 最近回合 重置为空数组，引擎仍能正常运行（prompt 里
+  // 只是少了几行回顾，不影响任何数值判定）。
+  最近回合: [],
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -460,7 +474,7 @@ function renderShop(router) {
     disabled: !vm.可出发 || undefined,
     onclick: () => {
       if (!vm.可出发) return
-      APP出发(vm)
+      APP出发(vm, router)
     },
   }, ['确认出发 →'])
 
@@ -469,9 +483,9 @@ function renderShop(router) {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// APP出发：生成初始状态，写自动存档，提示计划三
+// APP出发：生成初始状态，写自动存档，进入徒步主界面
 // ──────────────────────────────────────────────────────────────────
-function APP出发(shopVm) {
+function APP出发(shopVm, router) {
   const pc = {
     名字: APP会话.draft.名字,
     职业: APP会话.draft.职业,
@@ -501,31 +515,534 @@ function APP出发(shopVm) {
   }
 
   const journal = createJournal()
-  const APP存档结果 = writeSave(localStorage, 'auto', state, journal)
+  writeSave(localStorage, 'auto', state, journal)
 
-  // 切换到出发成功提示（复用 screen-shop，清空再写入）
-  const root = document.getElementById('screen-shop')
+  // 把 state/journal 挂到会话上，让 renderGame 能读到
+  APP会话.state = state
+  APP会话.journal = journal
+  APP会话.最近回合 = []
+
+  router.go('game')
+}
+
+// ──────────────────────────────────────────────────────────────────
+// renderGame：徒步主界面
+// ──────────────────────────────────────────────────────────────────
+function renderGame(router) {
+  const root = document.getElementById('screen-game')
+  const { state, journal } = APP会话
+  const vm = gameViewModel({ state, 回合: null, 说话人: null })
   clear(root)
 
-  root.appendChild(el('h1', { text: '出发！' }))
+  // ── 顶栏
+  const APP顶栏 = el('div', { class: 'game-topbar' })
+  const APP节点名 = el('span', { class: 'node-name' })
+  setText(APP节点名, vm.顶栏.地点)
+  const APP时间 = el('span')
+  setText(APP时间, vm.顶栏.时间)
+  const APP海拔 = el('span')
+  setText(APP海拔, vm.顶栏.海拔 + 'm')
+  const APP天气 = el('span')
+  setText(APP天气, vm.顶栏.天气)
+  APP顶栏.appendChild(APP节点名)
+  APP顶栏.appendChild(APP时间)
+  APP顶栏.appendChild(APP海拔)
+  APP顶栏.appendChild(APP天气)
+  root.appendChild(APP顶栏)
 
-  const APP出发面板 = el('div', { class: 'panel' })
-  APP出发面板.appendChild(el('p', { text: pc.名字 + ' 已准备就绪，背包装好，即将踏上鳌太线。' }))
-  APP出发面板.appendChild(el('p', { text: '季节：' + APP会话.季节 }))
-  APP出发面板.appendChild(el('p', { text: `剩余资金：¥${state.money}` }))
-  APP出发面板.appendChild(el('p', { text: `背包物品：${state.pack.length} 件，${state.carry.当前} kg` }))
-  APP出发面板.appendChild(el('p', { text: `同行队友：${APP会话.队友.map((t) => getNpc(t.npcId).名称).join('、')}` }))
+  // ── 双栏
+  const APP布局 = el('div', { class: 'game-layout' })
 
-  // 存档结果反馈（writeSave 返回 false 表示存储已满）
-  if (APP存档结果) {
-    APP出发面板.appendChild(el('p', { class: 'muted', text: '✓ 自动存档写入成功。' }))
-  } else {
-    APP出发面板.appendChild(el('div', { class: 'notice warn', text: '警告：存储空间不足，自动存档失败。请清理浏览器本地存储后重试，否则进度无法保留。' }))
+  // ── 左栏：面板
+  const APP左栏 = el('div', { class: 'game-sidebar' })
+  const APP面板 = renderPanel(vm.面板)
+  APP左栏.appendChild(APP面板)
+  APP布局.appendChild(APP左栏)
+
+  // ── 右栏：舞台 + 剧情 + 选项
+  const APP右栏 = el('div', { class: 'game-main' })
+
+  // 舞台（队友立绘，说话人高亮）
+  const APP舞台 = el('div', { class: 'stage' })
+  for (const p of vm.舞台.人物) {
+    const APP人物 = el('div', { class: p.说话中 ? 'stage-figure speaking' : 'stage-figure' })
+    const APP立绘容器 = el('div', { class: 'stage-portrait' })
+    portraitInto(APP立绘容器, p.npcId)
+    const APP名字 = el('span', { class: 'stage-name' })
+    setText(APP名字, p.名称)
+    APP人物.appendChild(APP立绘容器)
+    APP人物.appendChild(APP名字)
+    APP舞台.appendChild(APP人物)
+  }
+  APP右栏.appendChild(APP舞台)
+
+  // 错误提示位（回合出错时填入）
+  const APP错误位 = el('div')
+
+  // 剧情区
+  const APP剧情区 = el('div', { class: 'prose-area' })
+  const APP剧情标题 = el('div', { class: 'prose-title' })
+  const APP剧情正文 = el('div')
+  APP剧情区.appendChild(APP剧情标题)
+  APP剧情区.appendChild(APP剧情正文)
+  APP右栏.appendChild(APP错误位)
+  APP右栏.appendChild(APP剧情区)
+
+  // 万象区
+  const APP万象区 = el('div')
+  APP右栏.appendChild(APP万象区)
+
+  // 选项区
+  const APP选项区 = el('div', { class: 'options-area' })
+  APP右栏.appendChild(APP选项区)
+
+  // 操作按钮（跳过打字机）
+  const APP控制区 = el('div', { class: 'game-controls' })
+  APP右栏.appendChild(APP控制区)
+
+  APP布局.appendChild(APP右栏)
+  root.appendChild(APP布局)
+
+  // ── 等待首回合：如果自动存档有内容，还原状态后直接跑一次开场渲染
+  // （存档只存 state+journal，正文已丢失，第一次进来正文区留空，等玩家点选项）
+  // 初始化选项：首次进来用 FALLBACK_OPTIONS 作为占位选项，让玩家能选
+  // 但更干净的做法是把 runTurn 中第一次没有选中项时的行为理解为「开场白」——
+  // 当前实现里，首次进 game 屏没有选中项，由玩家点选项后才启动第一个回合。
+  // 这就需要一套初始选项。FALLBACK_OPTIONS 从 turn.js 导出，正好用。
+  // 但导入会增加一个模块依赖，而 gameViewModel 中 选项 在 回合==null 时返回 []。
+  // 计划：让首次进入时显示「开始徒步」的单一选项。
+  const APP初始选项 = [
+    { id: 'start', 文本: '出发上路！', 类型: '徒步', require: {}, cost: {}, 可点: true, 档: '达标', 概率文案: '', 理由: '' },
+  ]
+
+  // 当前待选选项（回合结束后更新）
+  let APP当前选项 = APP初始选项
+  let APP进行中 = false   // 防止连点
+  let APP当前打字机 = null
+  let APP打字机Timer = null
+
+  function APP停止打字机() {
+    if (APP打字机Timer !== null) {
+      clearInterval(APP打字机Timer)
+      APP打字机Timer = null
+    }
   }
 
-  APP出发面板.appendChild(el('p', { class: 'muted', text: '徒步阶段将在计划三中接上。目前已完成全部准备流程。' }))
+  function APP渲染剧情(文本) {
+    clear(APP剧情正文)
+    for (const 段 of splitParagraphs(文本)) {
+      const p = el('p')
+      setText(p, 段)
+      APP剧情正文.appendChild(p)
+    }
+  }
 
-  root.appendChild(APP出发面板)
+  function APP渲染面板(st) {
+    const panelVm = panelViewModel(st)
+    clear(APP左栏)
+    APP左栏.appendChild(renderPanel(panelVm))
+  }
+
+  function APP渲染舞台(st, 说话人) {
+    const { gameViewModel: gvm } = { gameViewModel }
+    // 直接调 stageViewModel 同源函数（从 screen-game.js 里的 stageViewModel 已被
+    // gameViewModel 包装使用，不单独导出；直接操作 DOM 节点更干净）
+    const 所有人物 = st.party.filter((p) => p.在队)
+    clear(APP舞台)
+    for (const p of 所有人物) {
+      const npc = getNpc(p.npcId)
+      const 名称 = npc ? npc.名称 : p.npcId
+      const APP人物 = el('div', { class: p.npcId === 说话人 ? 'stage-figure speaking' : 'stage-figure' })
+      const APP立绘容器 = el('div', { class: 'stage-portrait' })
+      portraitInto(APP立绘容器, p.npcId)
+      const APP名字 = el('span', { class: 'stage-name' })
+      setText(APP名字, 名称)
+      APP人物.appendChild(APP立绘容器)
+      APP人物.appendChild(APP名字)
+      APP舞台.appendChild(APP人物)
+    }
+  }
+
+  function APP渲染万象(万象) {
+    clear(APP万象区)
+    for (const 条 of (万象 || [])) {
+      const APP条 = el('div', { class: 'event-notice' })
+      setText(APP条, 条)
+      APP万象区.appendChild(APP条)
+    }
+  }
+
+  function APP渲染选项(选项, 禁用) {
+    clear(APP选项区)
+    for (const o of 选项) {
+      const 可点 = !禁用 && o.可点
+      let cls = 'option'
+      if (o.档 === '勉强') cls += ' warn-option'
+      const APP选项 = el('button', {
+        class: cls,
+        disabled: !可点 || undefined,
+        onclick: () => {
+          if (APP进行中) return
+          APP执行回合(o)
+        },
+      })
+      // 选项主文案
+      const APP文本节点 = el('span')
+      setText(APP文本节点, o.文本 || '')
+      APP选项.appendChild(APP文本节点)
+      // 副文案：概率 or 缺少理由
+      if (o.概率文案 || o.理由) {
+        const APP副文案 = el('span', { class: o.档 === '勉强' ? 'option-meta warn-meta' : 'option-meta' })
+        setText(APP副文案, o.概率文案 || ('差 ' + o.理由))
+        APP选项.appendChild(APP副文案)
+      }
+      APP选项区.appendChild(APP选项)
+    }
+  }
+
+  function APP渲染控制按钮(模式) {
+    // 模式：'idle' | 'typing' | 'done'
+    clear(APP控制区)
+    if (模式 === 'typing') {
+      const APP跳过 = el('button', {
+        onclick: () => {
+          if (!APP当前打字机) return
+          const 全文 = APP当前打字机.flush()
+          APP停止打字机()
+          APP渲染剧情(全文)
+        },
+      }, ['跳过'])
+      APP控制区.appendChild(APP跳过)
+    }
+  }
+
+  async function APP执行回合(选中项) {
+    if (APP进行中) return
+    APP进行中 = true
+
+    // 清除上一次的错误提示
+    clear(APP错误位)
+    // 请求中禁用全部选项
+    APP渲染选项(APP当前选项, true)
+    APP渲染控制按钮('typing')
+
+    // 清空剧情区，准备打字机
+    setText(APP剧情标题, '')
+    clear(APP剧情正文)
+    APP渲染万象([])
+
+    // 为这一回合建一个新打字机
+    const tw = createTypewriter()
+    APP当前打字机 = tw
+
+    // 启动 40ms 的匀速吐字 interval
+    APP停止打字机()
+    APP打字机Timer = setInterval(() => {
+      const 文本 = tw.tick()
+      if (文本 !== null) APP渲染剧情(文本)
+      if (tw.done()) {
+        APP停止打字机()
+        APP渲染控制按钮('done')
+      }
+    }, 40)
+
+    // 每次使用下一个随机数——以种子为基点，按已执行回合数推进 rng
+    // （保证同局种子下回放一致；APP最近回合.length 就是本回合前已执行的回合数）
+    const APP当前种子 = state.meta.随机种子 + APP会话.最近回合.length
+    const rng = makeRng(APP当前种子)
+
+    const r = await runTurn({
+      state,
+      journal,
+      选中项,
+      最近回合: APP会话.最近回合,
+      config: APP会话.config,
+      rng,
+      // window.__testStreamImpl 仅供手动浏览器验证，不走真实 API
+      streamImpl: typeof window !== 'undefined' && window.__testStreamImpl ? window.__testStreamImpl : undefined,
+      onDelta: (块) => {
+        // 只推入打字机，绝不直接操作 DOM
+        tw.push(块)
+      },
+    })
+
+    APP进行中 = false
+
+    if (!r.ok) {
+      // 出错：回滚（state 已在 runTurn 里回滚）、显示提示、保留选项
+      APP停止打字机()
+      clear(APP剧情正文)
+      const APP错误 = el('div', { class: 'error-notice' })
+      setText(APP错误, r.error && r.error.提示 ? r.error.提示 : '回合出错，请重试')
+      APP错误位.appendChild(APP错误)
+      // 恢复选项可点，让玩家重试
+      APP渲染选项(APP当前选项, false)
+      APP渲染控制按钮('idle')
+      return
+    }
+
+    // 把本回合摘要推入 最近回合（保留最近 4 条）
+    APP会话.最近回合.push({
+      标题: r.标题 || '',
+      剧情摘要: (r.剧情 || '').slice(0, 200),
+      选项: (r.选项 || []).map((o) => o.文本 || '').join(' / '),
+      判定: r.判定 ? (r.判定.outcome === 'success' ? '成功' : '失败') : '',
+    })
+    if (APP会话.最近回合.length > 4) APP会话.最近回合.shift()
+
+    // 回合解析完成：停止打字机，用干净的 r.剧情 替换原文。
+    // 打字机在流式阶段推送的是完整原文（含协议头，如 == 标题 ==、== STATE == 等），
+    // 解析后要换成只有正文的版本，否则玩家会看到协议行。
+    APP停止打字机()
+    setText(APP剧情标题, r.标题 || '')
+    APP渲染剧情(r.剧情 || '')
+
+    // 更新说话人 / 舞台
+    APP渲染舞台(state, r.说话人 || null)
+
+    // 更新万象
+    APP渲染万象(r.万象)
+
+    // 写自动存档
+    writeSave(localStorage, 'auto', state, journal)
+    // 刷新面板
+    APP渲染面板(state)
+    // 更新顶栏
+    const vm2 = gameViewModel({ state, 回合: r, 说话人: r.说话人 })
+    setText(APP节点名, vm2.顶栏.地点)
+    setText(APP时间, vm2.顶栏.时间)
+    setText(APP海拔, vm2.顶栏.海拔 + 'm')
+    setText(APP天气, vm2.顶栏.天气)
+    // 结局跳转
+    if (state.phase === '结局') {
+      router.go('ending')
+      return
+    }
+    // 更新选项
+    APP当前选项 = vm2.选项
+    APP渲染选项(APP当前选项, false)
+    APP渲染控制按钮('idle')
+  }
+
+  // 初始渲染选项
+  APP渲染选项(APP初始选项, false)
+  APP渲染控制按钮('idle')
+}
+
+// ──────────────────────────────────────────────────────────────────
+// renderPanel：左侧面板（可独立刷新）
+// ──────────────────────────────────────────────────────────────────
+function renderPanel(vm) {
+  const APP面板 = el('div', { class: 'panel' })
+
+  // PC 基础信息
+  const APP名字行 = el('div', { class: 'game-stat-row' })
+  const APP名字标签 = el('span', { class: 'game-stat-label' })
+  setText(APP名字标签, '角色')
+  const APP名字值 = el('span', { class: 'game-stat-val' })
+  setText(APP名字值, vm.名字 + '（' + vm.职业 + '）')
+  APP名字行.appendChild(APP名字标签)
+  APP名字行.appendChild(APP名字值)
+  APP面板.appendChild(APP名字行)
+
+  // 体力
+  const APP体力行 = el('div', { class: 'game-stat-row' })
+  const APP体力标签 = el('span', { class: 'game-stat-label' })
+  setText(APP体力标签, '体力')
+  const APP体力值 = el('span', { class: vm.体力告警 ? 'game-stat-val danger' : 'game-stat-val' })
+  setText(APP体力值, vm.体力)
+  APP体力行.appendChild(APP体力标签)
+  APP体力行.appendChild(APP体力值)
+  APP面板.appendChild(APP体力行)
+
+  const APP体力条容器 = el('div', { class: 'meter' })
+  const APP体力条 = el('div', {
+    class: vm.体力告警 ? 'meter-bar danger' : 'meter-bar',
+    style: 'width:' + vm.体力 + '%',
+  })
+  APP体力条容器.appendChild(APP体力条)
+  APP面板.appendChild(APP体力条容器)
+
+  // 负重
+  const APP负重行 = el('div', { class: 'game-stat-row', style: 'margin-top:8px' })
+  const APP负重标签 = el('span', { class: 'game-stat-label' })
+  setText(APP负重标签, '负重')
+  const APP负重档 = vm.负重.档
+  const APP负重值 = el('span', {
+    class: APP负重档 === '超重' ? 'game-stat-val danger' : (APP负重档 === '偏重' ? 'game-stat-val warn' : 'game-stat-val'),
+  })
+  setText(APP负重值, vm.负重.当前 + 'kg / ' + vm.负重.上限 + 'kg')
+  APP负重行.appendChild(APP负重标签)
+  APP负重行.appendChild(APP负重值)
+  APP面板.appendChild(APP负重行)
+
+  const APP负重条容器 = el('div', { class: 'meter' })
+  const APP负重条 = el('div', {
+    class: APP负重档 === '超重' ? 'meter-bar danger' : (APP负重档 === '偏重' ? 'meter-bar warn' : 'meter-bar'),
+    style: 'width:' + Math.round(vm.负重.比 * 100) + '%',
+  })
+  APP负重条容器.appendChild(APP负重条)
+  APP面板.appendChild(APP负重条容器)
+
+  // 现金
+  const APP现金行 = el('div', { class: 'game-stat-row', style: 'margin-top:8px' })
+  const APP现金标签 = el('span', { class: 'game-stat-label' })
+  setText(APP现金标签, '现金')
+  const APP现金值 = el('span', { class: 'game-stat-val' })
+  setText(APP现金值, '¥' + vm.现金)
+  APP现金行.appendChild(APP现金标签)
+  APP现金行.appendChild(APP现金值)
+  APP面板.appendChild(APP现金行)
+
+  // 同行者
+  if (vm.同行者.length > 0) {
+    const APP同行者标题 = el('div', { class: 'game-stat-row', style: 'margin-top:10px' })
+    const APP同行者标签 = el('span', { class: 'game-stat-label' })
+    setText(APP同行者标签, '同行者')
+    APP同行者标题.appendChild(APP同行者标签)
+    APP面板.appendChild(APP同行者标题)
+
+    for (const p of vm.同行者) {
+      const APP同行行 = el('div', { class: 'companion-row' })
+      const APP同行立绘 = el('div', { class: 'companion-portrait' })
+      portraitInto(APP同行立绘, p.npcId)
+      const APP同行信息 = el('div')
+      const APP同行名 = el('div')
+      setText(APP同行名, p.名称)
+      const APP同行好感 = el('div', { class: 'muted' })
+      setText(APP同行好感, p.分级 + ' · ' + p.好感)
+      APP同行信息.appendChild(APP同行名)
+      APP同行信息.appendChild(APP同行好感)
+      APP同行行.appendChild(APP同行立绘)
+      APP同行行.appendChild(APP同行信息)
+      APP面板.appendChild(APP同行行)
+    }
+  }
+
+  // 背包概览（只展示有余量告警的物品）
+  const APP告警物品 = vm.背包.filter((i) => i.余量告警)
+  if (APP告警物品.length > 0) {
+    const APP背包标题 = el('div', { class: 'game-stat-row', style: 'margin-top:10px' })
+    const APP背包标签 = el('span', { class: 'game-stat-label' })
+    setText(APP背包标签, '告急物资')
+    APP背包标题.appendChild(APP背包标签)
+    APP面板.appendChild(APP背包标题)
+
+    for (const i of APP告警物品) {
+      const APP物品行 = el('div', { class: 'pack-item low' })
+      const APP物品名 = el('span')
+      setText(APP物品名, i.名称)
+      const APP物品余 = el('span')
+      setText(APP物品余, '余' + i.余量 + '%')
+      APP物品行.appendChild(APP物品名)
+      APP物品行.appendChild(APP物品余)
+      APP面板.appendChild(APP物品行)
+    }
+  }
+
+  return APP面板
+}
+
+// ──────────────────────────────────────────────────────────────────
+// renderEnding：结局页
+// ──────────────────────────────────────────────────────────────────
+function renderEnding() {
+  const root = document.getElementById('screen-ending')
+  clear(root)
+
+  const { state, journal } = APP会话
+  const vm = endingViewModel(state, journal)
+
+  if (!vm) {
+    // 不该发生（只有 phase==='结局' 才路由到这里），保底处理
+    root.appendChild(el('p', { class: 'muted', text: '结局数据缺失，请检查状态。' }))
+    return
+  }
+
+  // 标题区
+  const APP标题区 = el('div', { class: 'ending-header' })
+  const APP定性 = el('div', { class: 'ending-type' })
+  setText(APP定性, vm.定性)
+  const APP标题 = el('h1', { class: 'ending-title' })
+  setText(APP标题, vm.标题)
+  const APP说明 = el('p', { class: 'ending-desc' })
+  setText(APP说明, vm.说明)
+  APP标题区.appendChild(APP定性)
+  APP标题区.appendChild(APP标题)
+  APP标题区.appendChild(APP说明)
+
+  if (vm.原因) {
+    const APP原因 = el('p', { class: 'ending-desc' })
+    setText(APP原因, vm.原因)
+    APP标题区.appendChild(APP原因)
+  }
+
+  if (vm.罚款) {
+    const APP罚款 = el('p', { class: 'ending-fine' })
+    setText(APP罚款, '罚款：¥' + vm.罚款)
+    APP标题区.appendChild(APP罚款)
+  }
+
+  root.appendChild(APP标题区)
+
+  // 回顾：基本数据
+  const APP基本回顾 = el('div', { class: 'recap-section' })
+  const APP基本标题 = el('h2', { text: '旅程回顾' })
+  APP基本回顾.appendChild(APP基本标题)
+
+  const APP天数行 = el('div', { class: 'recap-item' })
+  setText(APP天数行, '坚持了 ' + vm.回顾.天数 + ' 天')
+  APP基本回顾.appendChild(APP天数行)
+
+  if (vm.回顾.最高点) {
+    const APP最高点行 = el('div', { class: 'recap-item recap-peak' })
+    setText(APP最高点行, '最高点：' + vm.回顾.最高点.名称 + ' ' + vm.回顾.最高点.海拔 + 'm')
+    APP基本回顾.appendChild(APP最高点行)
+  }
+
+  root.appendChild(APP基本回顾)
+
+  // 经过节点
+  if (vm.回顾.节点.length > 0) {
+    const APP节点区 = el('div', { class: 'recap-section' })
+    const APP节点标题 = el('h2', { text: '走过的地方' })
+    APP节点区.appendChild(APP节点标题)
+    const APP节点序列 = el('div', { class: 'recap-item' })
+    setText(APP节点序列, vm.回顾.节点.join(' → '))
+    APP节点区.appendChild(APP节点序列)
+    root.appendChild(APP节点区)
+  }
+
+  // 关键事件
+  if (vm.回顾.事件.length > 0) {
+    const APP事件区 = el('div', { class: 'recap-section' })
+    const APP事件标题 = el('h2', { text: '关键事件' })
+    APP事件区.appendChild(APP事件标题)
+    for (const e of vm.回顾.事件) {
+      const APP事件行 = el('div', { class: 'recap-item' })
+      setText(APP事件行, e)
+      APP事件区.appendChild(APP事件行)
+    }
+    root.appendChild(APP事件区)
+  }
+
+  // 好感
+  if (vm.回顾.好感.length > 0) {
+    const APP好感区 = el('div', { class: 'recap-section' })
+    const APP好感标题 = el('h2', { text: '同行者' })
+    APP好感区.appendChild(APP好感标题)
+    for (const p of vm.回顾.好感) {
+      const APP好感行 = el('div', { class: 'recap-item' })
+      const APP好感名 = el('span')
+      setText(APP好感名, p.名称)
+      const APP好感值 = el('span', { class: 'muted' })
+      setText(APP好感值, '　' + p.分级 + '（' + (p.在队 ? '在队' : '已离队') + '）')
+      APP好感行.appendChild(APP好感名)
+      APP好感行.appendChild(APP好感值)
+      APP好感区.appendChild(APP好感行)
+    }
+    root.appendChild(APP好感区)
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -541,7 +1058,23 @@ function 启动() {
   router.register('create', { onEnter: () => renderCreate(router) })
   router.register('draw', { onEnter: () => renderDraw(router) })
   router.register('shop', { onEnter: () => renderShop(router) })
-  router.go('config')
+  router.register('game', { onEnter: () => renderGame(router) })
+  router.register('ending', { onEnter: () => renderEnding() })
+
+  // 有存档就还原状态直接进主界面（刷新后进度还在）
+  const APP存档 = readSave(localStorage, 'auto')
+  if (APP存档 && APP存档.state && APP存档.state.phase !== '结局') {
+    APP会话.state = APP存档.state
+    APP会话.journal = APP存档.journal
+    APP会话.最近回合 = []
+    router.go('game')
+  } else if (APP存档 && APP存档.state && APP存档.state.phase === '结局') {
+    APP会话.state = APP存档.state
+    APP会话.journal = APP存档.journal
+    router.go('ending')
+  } else {
+    router.go('config')
+  }
 }
 
 if (typeof document !== 'undefined') 启动()

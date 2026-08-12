@@ -46,7 +46,7 @@ export function portraitSvg(id) {
   const 肩 = Math.round(t.肩宽 * 100)
   const 头 = Math.round(t.头大 * 100)
   return [
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 160" preserveAspectRatio="xMidYMax meet">',
+    '<svg class="portrait-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 160" preserveAspectRatio="xMidYMax meet">',
     `<defs><linearGradient id="g${portraitSeed(id).toString(36)}" x1="0" y1="0" x2="0" y2="1">`,
     `<stop offset="0" stop-color="${t.主色}"/><stop offset="1" stop-color="${t.暗色}"/>`,
     '</linearGradient></defs>',
