@@ -2986,8 +2986,11 @@ function 提取选项(lines) {
   for (const raw of lines) {
     const line = raw.trim()
     if (!line) continue
-    const m = line.match(/^([A-Da-d])\s*[.、．)）:：]?\s*(.+)$/)
-    if (m) out.push({ id: m[1].toUpperCase(), 文本: m[2].trim() })
+    // 标号连全角字母 Ａ-Ｄ 一并认。模型在中文语境下真的会打出全角字母，
+    // 只认 ASCII 的话整回合会解析出 0 个选项、直接掉进降级分支。
+    // NFKC 把 Ａ 归一成 A，顺带处理 ａ 这类小写全角。
+    const m = line.match(/^([A-Da-dＡ-Ｄａ-ｄ])\s*[.、．)）:：]?\s*(.+)$/)
+    if (m) out.push({ id: m[1].normalize('NFKC').toUpperCase(), 文本: m[2].trim() })
   }
   return out
 }
@@ -3074,7 +3077,7 @@ export function parseTurn(raw) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/parser.test.js`
-Expected: PASS，21 个测试全绿。最后一条「从不抛异常」是这个模块的生命线——它失败就意味着线上会白屏。
+Expected: PASS，19 个测试全绿（计划正文原写 21，实为 18，加全角标号测试后 19）。最后一条「从不抛异常」是这个模块的生命线——它失败就意味着线上会白屏。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 

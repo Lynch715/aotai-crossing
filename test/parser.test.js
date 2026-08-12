@@ -121,6 +121,15 @@ test('选项用顿号或右括号分隔也认', () => {
   assert.equal(r.选项[3].文本, '丁选项')
 })
 
+test('选项标号用全角字母也认', () => {
+  // 模型在中文语境下真会打全角字母；只认 ASCII 会解析出 0 个选项而整回合降级
+  const r = parseTurn(`[下回选项]\nＡ．甲选项\nＢ、乙选项\nＣ) 丙选项\nｄ. 丁选项`)
+  assert.equal(r.选项.length, 4)
+  assert.deepEqual(r.选项.map((o) => o.id), ['A', 'B', 'C', 'D'])
+  assert.equal(r.选项[0].文本, '甲选项')
+  assert.equal(r.选项[3].文本, '丁选项')
+})
+
 test('缺少标题段时标题为空串，不报错', () => {
   const r = parseTurn(`[剧情]\n只有正文\n\n[下回选项]\nA. 甲`)
   assert.equal(r.标题, '')
