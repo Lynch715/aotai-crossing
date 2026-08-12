@@ -199,3 +199,65 @@ test('parseTurn 从不抛异常', () => {
     assert.doesNotThrow(() => parseTurn(s), `炸在: ${s.slice(0, 30)}`)
   }
 })
+
+// ══════════════════════════════════════════════════════════════
+// 真模型跑偏实录
+//
+// 此前解析器的测试全是我们自己写的规整格式，从没测过真模型实际会
+// 怎么偏。上线后第一次真跑就撞上了：正文残缺、选项为 0、掉进降级，
+// 玩家看到四个来路不明的兜底选项。
+//
+// 下面每一条都是真实会发生的偏法，一条都不许再退化。
+// ══════════════════════════════════════════════════════════════
+
+const 齐活 = (r) => !!(r.剧情 && r.选项.length && r.state !== null)
+
+test('跑偏①：整个回复被 markdown 围栏包住', () => {
+  const r = parseTurn('```\n[剧情]\n甲乙丙。\n\n[下回选项]\nA. 走\n\n<<<STATE>>>\n{"选项":[]}\n```')
+  assert.ok(齐活(r), `解析不全：选项${r.选项.length} STATE${r.state !== null}`)
+})
+
+test('跑偏②：用 ## 当段落标记而非方括号', () => {
+  const r = parseTurn('## 剧情\n甲乙丙。\n\n## 下回选项\nA. 走\n\n<<<STATE>>>\n{"选项":[]}')
+  assert.ok(齐活(r), `解析不全：选项${r.选项.length}`)
+})
+
+test('跑偏③：STATE 标记被加了粗体', () => {
+  const r = parseTurn('[剧情]\n甲乙丙。\n\n[下回选项]\nA. 走\n\n**<<<STATE>>>**\n{"选项":[]}')
+  assert.ok(r.state !== null, '一对星号就让整段结算丢了')
+})
+
+test('跑偏④：选项写成 1. 2. 而非 A. B.，按序映射到 A-D', () => {
+  const r = parseTurn('[剧情]\n甲。\n\n[下回选项]\n1. 走\n2. 停\n3. 歇\n4. 看\n\n<<<STATE>>>\n{}')
+  assert.equal(r.选项.length, 4)
+  assert.deepEqual(r.选项.map((o) => o.id), ['A', 'B', 'C', 'D'])
+  assert.equal(r.选项[0].文本, '走')
+})
+
+test('跑偏⑤：选项用圈号 ①②③④', () => {
+  const r = parseTurn('[剧情]\n甲。\n\n[下回选项]\n① 走\n② 停\n\n<<<STATE>>>\n{}')
+  assert.deepEqual(r.选项.map((o) => o.id), ['A', 'B'])
+})
+
+test('跑偏⑥：选项文案被加粗，星号要剥掉', () => {
+  const r = parseTurn('[剧情]\n甲。\n\n[下回选项]\n**A. 走**\n\n<<<STATE>>>\n{}')
+  assert.equal(r.选项.length, 1)
+  assert.equal(r.选项[0].文本, '走', `星号没剥干净：${r.选项[0].文本}`)
+})
+
+test('跑偏⑦：混合偏法——## 标题 + 数字选项 + 粗体 STATE', () => {
+  const r = parseTurn('## 剧情\n甲乙丙。\n\n## 下回选项\n1. 走\n2. 停\n\n**<<<STATE>>>**\n{"选项":[]}')
+  assert.ok(齐活(r), `混合偏法解析不全：选项${r.选项.length} STATE${r.state !== null}`)
+})
+
+test('跑偏⑧：段落名后跟中文冒号', () => {
+  const r = parseTurn('剧情：\n甲乙丙。\n\n下回选项：\nA. 走\n\n<<<STATE>>>\n{}')
+  assert.ok(r.剧情.includes('甲乙丙'), `正文丢了：${JSON.stringify(r.剧情)}`)
+  assert.equal(r.选项.length, 1)
+})
+
+test('被截断时老实报错，不假装成功', () => {
+  const r = parseTurn('[剧情]\n陈岩用杖尖敲了敲碎石，声音发')
+  assert.equal(r.state, null)
+  assert.ok(r.errors.some((e) => e.includes('STATE')), '没点出 STATE 缺失')
+})

@@ -2,12 +2,14 @@ export const STATE_MARKER = '<<<STATE>>>'
 
 // 段落标记：半角与全角方括号都认。正则预编译，别在每行上重新构造。
 // 尾部 (.*) 是为了接住「标记和首句写在同一行」的情况。
-const SECTIONS = [
-  { key: '标题', 正则: /^[\[【]\s*剧情标题\s*[\]】]\s*(.*)$/ },
-  { key: '剧情', 正则: /^[\[【]\s*剧情\s*[\]】]\s*(.*)$/ },
-  { key: '万象', 正则: /^[\[【]\s*鳌太万象\s*[\]】]\s*(.*)$/ },
-  { key: '选项', 正则: /^[\[【]\s*下回选项\s*[\]】]\s*(.*)$/ },
-]
+// 模型不一定照抄方括号——实测它会写成 ## 剧情、**剧情**、或干脆「剧情：」。
+// 只认一种写法的话，整段会被归进上一个 bucket 里静默消失，
+// 出来就是「正文残缺 + 选项为 0 + 掉进降级」。
+const 段落名 = { 标题: '剧情标题', 剧情: '剧情', 万象: '鳌太万象', 选项: '下回选项' }
+const SECTIONS = Object.entries(段落名).map(([key, 名]) => ({
+  key,
+  正则: new RegExp(`^\\s*(?:#{1,4}\\s*)?(?:\\*{1,2})?[\\[【]?\\s*${名}\\s*[\\]】]?(?:\\*{1,2})?\\s*[:：]?\\s*(.*)$`),
+}))
 
 // 把正文按段落标记切开。任何一段缺失都不算致命。
 function 切段(text) {
@@ -58,8 +60,18 @@ function 提取选项(lines) {
     // NFKC 把 Ａ 归一成 A，顺带处理 ａ 这类小写全角。
     // 正文首字符不能是分隔符本身，否则「A.」这种半截行会被解析成
     // 文本为「.」的选项，还不进 errors——UI 上就是个标着句点的按钮。
-    const m = line.match(/^([A-Da-dＡ-Ｄａ-ｄ])\s*[.、．)）:：]?\s*([^\s.、．)）:：].*)$/)
-    if (m) out.push({ id: m[1].normalize('NFKC').toUpperCase(), 文本: m[2].trim() })
+    const m = line.match(/^(?:\*{0,2})([A-Da-dＡ-Ｄａ-ｄ])\s*[.、．)）:：]?\s*([^\s.、．)）:：].*)$/)
+    if (m) {
+      out.push({ id: m[1].normalize('NFKC').toUpperCase(), 文本: m[2].replace(/\*+$/, '').trim() })
+      continue
+    }
+    // 模型常把选项写成 1. 2. 或 ①②。按出现顺序映射到 A-D——
+    // 只认字母的话，这一回合会解析出 0 个选项，直接掉进降级分支。
+    const n = line.match(/^(?:\*{0,2})(?:(\d)\s*[.、．)）:：]|([①②③④]))\s*(.+)$/)
+    if (n) {
+      const 序 = n[1] ? Number(n[1]) : '①②③④'.indexOf(n[2]) + 1
+      if (序 >= 1 && 序 <= 4) out.push({ id: 'ABCD'[序 - 1], 文本: n[3].replace(/\*+$/, '').trim() })
+    }
   }
   return out
 }
@@ -109,10 +121,20 @@ function 找尾段标记(raw) {
   for (;;) {
     const i = raw.indexOf(STATE_MARKER, from)
     if (i === -1) break
-    if (i === 0 || raw[i - 1] === '\n') 命中 = i
+    // 行首即可，但要容忍模型加的修饰：**<<<STATE>>>**、### <<<STATE>>>。
+    // 只认「前一个字符是换行」的话，一个星号就能让整段结算丢掉。
+    const 行首 = raw.lastIndexOf('\n', i - 1) + 1
+    const 前缀 = raw.slice(行首, i)
+    if (/^[\s*#>-]*$/.test(前缀)) 命中 = i
     from = i + STATE_MARKER.length
   }
   return 命中
+}
+
+// 尾段标记之后可能跟着模型加的粗体收尾（**）。只剥这类修饰——
+// 反引号要留给 剥围栏 去认，先剥掉会把 ```json 围栏拆散，反而解析不了。
+function 剥尾段修饰(s) {
+  return s.replace(/^[ \t*#]*/, '')
 }
 
 // 解析一整回合的模型输出。约定：本函数永不抛异常，问题一律进 errors。
@@ -126,9 +148,13 @@ export function parseTurn(raw) {
 
   // 真正的尾段标记按协议独占一行。只认行首出现的那个，
   // 这样对话里引用的 <<<STATE>>> 和 JSON 字符串值里的 <<<STATE>>> 都不会切错位置。
+  // 模型常把整个回复包进一对 ``` 里。不先剥掉的话，尾段 JSON 后面会拖着
+  // 一个收尾的 ```，解析必挂。
+  raw = 剥围栏(raw)
+
   const idx = 找尾段标记(raw)
   const 正文 = idx === -1 ? raw : raw.slice(0, idx)
-  const 尾段 = idx === -1 ? null : raw.slice(idx + STATE_MARKER.length)
+  const 尾段 = idx === -1 ? null : 剥尾段修饰(raw.slice(idx + STATE_MARKER.length))
 
   const buckets = 切段(正文)
 
