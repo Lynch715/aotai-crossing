@@ -8,6 +8,7 @@ const ROOT = dirname(fileURLToPath(import.meta.url))
 export const MODULE_ORDER = [
   'src/data/route.js',
   'src/data/npcs.js',
+  'src/data/gear.js',
   'src/engine/rng.js',
 ]
 
