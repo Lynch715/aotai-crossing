@@ -27,6 +27,7 @@ export const MODULE_ORDER = [
   'src/ui/router.js',
   'src/ui/save.js',
   'src/ui/config.js',
+  'src/ui/portrait.js',
 ]
 
 // 只删真正的 import 语句（必须有 from 子句或裸副作用导入），
