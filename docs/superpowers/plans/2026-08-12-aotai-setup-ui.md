@@ -2952,3 +2952,20 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## 不在本计划范围
 
 主界面（双栏仪表盘 + 立绘舞台 + 剧情流 + 选项区）、结局页、徒步阶段的回合循环——全部留给计划三。本计划完成时，点「出发」会提示「计划三将接上徒步阶段」。
+
+
+---
+
+## 留给计划三的两条
+
+**1. `textContent` 会吃掉换行——LLM 正文的分段会消失。**
+
+`src/styles.css` 里没有任何 `white-space` 规则，默认 `normal` 会把 `\n` 折叠成空格。直接 `setText(节点, 剧情)` 会让「段落一\n\n段落二」渲染成「段落一 段落二」。
+
+正确做法不是退回 `innerHTML`，而是按 `\n\n` 切段，每段一个 `el('p')` + `setText`，全程留在 `textContent` 里。或者给剧情容器加 `white-space: pre-wrap`。
+
+**2. `isHarshWeather` 与 `sleep()` 还没接上。**
+
+Task 3 定义了 `isHarshWeather(state.weather)`（等级 ≥6 即恶劣），但 `sleep(state, { 恶劣天气 })` 仍要调用方自己传，而 `turn.js` 目前**根本没有调用 `sleep()`**——夜间阶段还没做。
+
+计划三接主循环时必须把这条接上：`sleep(state, { 恶劣天气: isHarshWeather(state.weather) })`。忘了接，`isHarshWeather` 就是第三个死代码（前两个是 `失温连败` 和 `party.js`，都是这样被发现的）。
