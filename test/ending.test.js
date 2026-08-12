@@ -65,6 +65,35 @@ test('失败遇险优先于被救援', () => {
   assert.equal(checkEnding(s).type, '失败遇险')
 })
 
+test('走到备用下撤点 → 主动下撤，不再卡在无结局状态', () => {
+  const 核桃坪 = checkEnding(状态({ place: { nodeId: 'hetaoping', 海拔: 1500 } }))
+  assert.equal(核桃坪.type, '主动下撤')
+  assert.ok(核桃坪.原因.includes('核桃坪'))
+
+  const 嵩坪寺 = checkEnding(状态({ place: { nodeId: 'songpingsi', 海拔: 1400 } }))
+  assert.equal(嵩坪寺.type, '主动下撤')
+})
+
+test('下撤让位于失败遇险与被救援', () => {
+  const 濒死 = 状态({ place: { nodeId: 'hetaoping', 海拔: 1500 }, pc: { 体力: 0, 伤病: [] } })
+  assert.equal(checkEnding(濒死).type, '失败遇险')
+
+  const 已求救 = 状态({
+    place: { nodeId: 'hetaoping', 海拔: 1500 },
+    flags: { 已求救: true, 已下撤: false, 失温连败: 0 },
+  })
+  assert.equal(checkEnding(已求救).type, '被救援')
+})
+
+test('applyEnding 幂等，重复调用不会再扣一次罚款', () => {
+  const s = 状态({ place: { nodeId: 'xiabansi', 海拔: 2800 }, money: 8000 })
+  const e = checkEnding(s)
+  applyEnding(s, e)
+  assert.equal(s.money, 3000)
+  applyEnding(s, e)
+  assert.equal(s.money, 3000, '第二次调用不该再扣 5000')
+})
+
 test('applyEnding 写入 phase 与结局，并对成功穿越扣罚款', () => {
   // 钱要多于罚款才看得出扣款；基础夹具的 4320 不够扣，会被下限夹成 0
   const s = 状态({ place: { nodeId: 'xiabansi', 海拔: 2800 }, money: 8000 })

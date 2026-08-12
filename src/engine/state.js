@@ -22,6 +22,7 @@ export function createInitialState(opts) {
     carry: { 当前: 0, 上限: 30 },
     party: opts.队友.map((t) => ({ npcId: t.npcId, 好感: t.好感, 状态: '正常', 在队: true })),
     flags: { 已求救: false, 已下撤: false, 高海拔过夜数: 0, 失温连败: 0, 触发过的事件id: [] },
+    ending: null,
   }
 
   const 起点节点 = getNode(state.place.nodeId)

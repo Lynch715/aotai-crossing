@@ -1,3 +1,5 @@
+import { getNode } from '../data/route.js'
+
 export const FINE_AMOUNT = 5000
 
 const 重伤致命天数 = 2
@@ -25,6 +27,13 @@ export function checkEnding(state) {
     return { type: '被救援', 原因: '发出了求救信号，等来了救援队' }
   }
 
+  // 走到备用下撤点＝主动放弃，游戏同样结束。不认这条的话，从核桃坪或嵩坪寺
+  // 出山的玩家会卡在「叙事上已结束、引擎却一直返回 null」的死循环里。
+  const 当前节点 = getNode(state.place.nodeId)
+  if (当前节点 && 当前节点.类型 === '下撤') {
+    return { type: '主动下撤', 原因: `从${当前节点.名称}下撤出山，没走完全程` }
+  }
+
   if (state.place.nodeId === 终点节点) {
     return { type: '成功穿越', 原因: '走到了下板寺', 罚款: FINE_AMOUNT }
   }
@@ -34,6 +43,8 @@ export function checkEnding(state) {
 
 export function applyEnding(state, ending) {
   if (!ending) return state
+  // 幂等：重复调用不会再扣一次罚款。T17 重试回合时可能二次触发。
+  if (state.phase === '结局') return state
   state.phase = '结局'
   state.ending = ending
   if (ending.type === '成功穿越') {
