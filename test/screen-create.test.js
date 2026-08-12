@@ -80,3 +80,18 @@ test('视图模型带出全部性格标签与推算出的经验', () => {
   assert.equal(vm.户外经验, deriveExperience(草稿()))
   assert.equal(vm.可继续, true)
 })
+
+test('自填字段有长度上限——它们会进每一次 LLM 请求', () => {
+  assert.equal(validateDraft(草稿({ 名字: '啊'.repeat(13) })).ok, false)
+  assert.equal(validateDraft(草稿({ 职业: '啊'.repeat(21) })).ok, false)
+  assert.equal(validateDraft(草稿({ 外貌: '啊'.repeat(61) })).ok, false)
+  assert.equal(validateDraft(草稿({ 技能: ['正常', '也正常', '啊'.repeat(13)] })).ok, false)
+  // 边界内照常放行
+  assert.equal(validateDraft(草稿({ 名字: '啊'.repeat(12), 外貌: '啊'.repeat(60) })).ok, true)
+})
+
+test('随机捏人产出的草稿不会撞上长度上限', () => {
+  for (let i = 0; i < 50; i++) {
+    assert.equal(validateDraft(randomDraft(makeRng(i))).ok, true, `第 ${i} 次随机超限`)
+  }
+})

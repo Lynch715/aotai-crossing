@@ -2244,15 +2244,25 @@ export function deriveExperience(draft) {
   return Math.max(0, Math.min(100, 底子 + 技能加成 + 年龄加成 + 微调))
 }
 
+// 这些字段会逐字进入每一次 LLM 请求。不设上限的话，一段几千字的「外貌」
+// 会让此后每个回合的 prompt 都跟着膨胀，玩家每轮都为它付钱。
+const CREATE_LIMITS = { 名字: 12, 职业: 20, 外貌: 60, 技能项: 12 }
+
 export function validateDraft(draft) {
   const 问题 = []
   if (!String(draft.名字 || '').trim()) 问题.push('名字还没填')
+  else if (String(draft.名字).length > CREATE_LIMITS.名字) 问题.push(`名字不能超过 ${CREATE_LIMITS.名字} 字`)
   if (!String(draft.职业 || '').trim()) 问题.push('职业还没填')
+  else if (String(draft.职业).length > CREATE_LIMITS.职业) 问题.push(`职业不能超过 ${CREATE_LIMITS.职业} 字`)
+  if ((draft.技能 || []).some((s) => String(s).length > CREATE_LIMITS.技能项)) {
+    问题.push(`单个技能不能超过 ${CREATE_LIMITS.技能项} 字`)
+  }
   const 年龄 = Number(draft.年龄)
   if (!Number.isFinite(年龄) || 年龄 < 16 || 年龄 > 70) 问题.push('年龄要在 16 到 70 之间')
   if (!['男', '女'].includes(draft.性别)) 问题.push('还没选性别')
   if (!PERSONALITY_TAGS.some((t) => t.id === draft.性格)) 问题.push('还没选性格')
   if (!String(draft.外貌 || '').trim()) 问题.push('外貌还没填')
+  else if (String(draft.外貌).length > CREATE_LIMITS.外貌) 问题.push(`外貌不能超过 ${CREATE_LIMITS.外貌} 字`)
   if ((draft.技能 || []).length !== 3) 问题.push('技能要正好选 3 个')
   return { ok: 问题.length === 0, 问题 }
 }
