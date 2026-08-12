@@ -3,12 +3,13 @@ import { makeRng } from './engine/rng.js'
 import { judgeOption } from './engine/threshold.js'
 import { applyStepCost, advanceSlot, dailyUpkeep } from './engine/consume.js'
 import { applyAffinityDelta } from './engine/affinity.js'
+import { npcLeaves } from './engine/party.js'
 import { checkEnding, applyEnding } from './engine/ending.js'
 import { recordNode, recordEvent, addForeshadow, resolveForeshadow, compressJournal } from './engine/journal.js'
 import { getNode } from './data/route.js'
 import { buildSystemPrompt, buildUserMessage, buildRepairMessage } from './llm/prompt.js'
 import { parseTurn } from './llm/parser.js'
-import { validateProposal, clampRequire, clampCost } from './llm/validate.js'
+import { validateProposal, clampRequire, clampCost, weatherLevel } from './llm/validate.js'
 import { streamChat } from './llm/client.js'
 
 export const MAX_REPAIR = 2
@@ -119,6 +120,9 @@ export async function runTurn({
     结果.warnings.push(...v.warnings)
 
     for (const c of v.好感变更) applyAffinityDelta(state, c.npcId, c.delta, { 重大: c.重大 })
+    for (const 离 of v.离队) {
+      npcLeaves(state, journal, 离.npcId, 离.因)
+    }
     for (const m of v.记忆) recordEvent(journal, state.clock, m)
     for (const f of v.伏笔.新增) addForeshadow(journal, f)
     for (const f of v.伏笔.已收) resolveForeshadow(journal, f)
@@ -131,7 +135,11 @@ export async function runTurn({
     if (parsed.state.天气建议) {
       // 这是唯一不经 validateProposal 的 LLM 字段（纯展示、不参与任何判定），
       // 但仍要截断——模型偶尔会把整段天气描写塞进来。
-      state.weather = { 状态: String(parsed.state.天气建议).slice(0, 40), 等级: state.weather.等级 }
+      // 先按完整描述解析等级，再截断显示文本。反过来的话，模型写了长句时
+      // 关键词会被切掉——「…傍晚可能暴风雪」截到 40 字只剩「多云」，
+      // 9 级暴风雪静默降成 2 级，没有任何报错。
+      const 全文 = String(parsed.state.天气建议)
+      state.weather = { 状态: 全文.slice(0, 40), 等级: weatherLevel(全文) }
     }
 
     // LLM 申报的门槛挂回选项上，供下回合判定与置灰使用

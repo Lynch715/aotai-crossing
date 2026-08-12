@@ -5,10 +5,10 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-test('原表 21 项，扩充 25 项', () => {
+test('原表 21 项，扩充 26 项', () => {
   assert.equal(GEAR.length, 21)
-  assert.equal(EXTRA_GEAR.length, 25)
-  assert.equal(ALL_GEAR.length, 46)
+  assert.equal(EXTRA_GEAR.length, 26)
+  assert.equal(ALL_GEAR.length, 47)
 })
 
 test('id 全局唯一', () => {
@@ -50,11 +50,11 @@ test('中档全配落在 14kg / ¥14,375 附近', () => {
   assert.equal(总价, 14375)
 })
 
-test('扩充物资合计 16.05kg / ¥7,630', () => {
+test('扩充物资合计 17.85kg / ¥10,030', () => {
   const 总重 = EXTRA_GEAR.reduce((s, g) => s + g.档次[0].重量, 0)
   const 总价 = EXTRA_GEAR.reduce((s, g) => s + g.档次[0].价格, 0)
-  assert.ok(Math.abs(总重 - 16.05) < 0.05, `总重 ${总重}`)
-  assert.equal(总价, 7630)
+  assert.ok(Math.abs(总重 - 17.85) < 0.05, `总重 ${总重}`)
+  assert.equal(总价, 10030)
 })
 
 test('两条约束同时咬人：全配超 30kg 且远超 ¥10,000', () => {
@@ -96,4 +96,20 @@ test('原表 21 项名称与源文档逐字一致', () => {
 
   const 走失 = GEAR.filter((g) => !源文归一.includes(归一(g.名称))).map((g) => g.名称)
   assert.deepEqual(走失, [], `以下原表装备名在源文档中找不到对应：\n  ${走失.join('\n  ')}`)
+})
+
+test('极寒睡袋温标够冬季用', () => {
+  const g = getGear('winter_bag')
+  assert.ok(g, '缺少 winter_bag')
+  assert.equal(g.温标, -25)
+  // 冬季夜间 -25℃，温标 -25℃ 正好够（判定用严格小于）
+  assert.ok(!(-25 < g.温标), '极寒睡袋仍扛不住冬季，那这项就白加了')
+})
+
+test('两款睡袋并存，价格与保暖成正比', () => {
+  const 普通 = getGear('sleeping_bag')
+  const 极寒 = getGear('winter_bag')
+  assert.ok(极寒.温标 < 普通.温标, '极寒睡袋应该更保暖')
+  assert.ok(极寒.档次[0].价格 > 普通.档次[1].价格, '更保暖的应该更贵')
+  assert.ok(极寒.档次[0].重量 > 普通.档次[1].重量, '更保暖的应该更重')
 })

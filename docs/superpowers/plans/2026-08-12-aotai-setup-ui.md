@@ -43,6 +43,8 @@ Task 5 会把这条约束固化成一条测试。
 | 文件 | 职责 |
 |---|---|
 | `src/engine/party.js` | **新增。** 队友在队状态与人物状态的唯一改动入口，同时写 `state` 与 `journal`，杜绝两处不同步 |
+| `src/llm/validate.js` | 修改。新增 `离队` 提议字段——否则 `party.js` 是死代码 |
+| `src/llm/prompt.js` | 修改。协议说明与范例里加上 `离队` |
 | `src/engine/consume.js` | 修改。`sleep()` 接入失温判定，维护 `flags.失温连败` |
 | `src/llm/validate.js` | 修改。`天气建议` 解析出 `{状态, 等级}`，让 `weather.等级` 不再是孤儿 |
 | `src/data/gear.js` | 修改。补一款极寒睡袋，让冬季那条消不掉的警告能被消除 |
@@ -213,6 +215,219 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
+### Task 1B: 让模型有办法说「这个人走了」
+
+Task 1 建好了 `party.js`，但**没有任何路径能调到它**——实测确认：
+
+- `validateProposal` 返回 `{好感变更, 记忆, 伏笔, 选项, 去向, warnings}`，**没有离队字段**
+- `src/llm/prompt.js` 里「离队」「下撤」「退出」一个字都没有
+
+也就是说模型可以在正文里写「王大鹏膝伤严重，从水窝子下撤了」，而引擎永远不会知道。下一回合玩家照样能对着他搭话，好感门槛照样为他放行。
+
+这正是计划一里 `失温连败` 的翻版：写了个模块，没有触发它的路。**不补这一步，Task 1 就是死代码。**
+
+**Files:**
+- Modify: `src/llm/validate.js`
+- Modify: `src/llm/prompt.js`
+- Modify: `src/turn.js`
+- Test: `test/validate.test.js`、`test/turn.test.js`（追加）
+
+- [ ] **Step 1: 追加失败的测试**
+
+`test/validate.test.js` 追加：
+
+```js
+test('离队提议按名字解析，写进 离队', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '王大鹏', 因: '膝伤严重，从水窝子下撤' }] })
+  assert.equal(r.离队.length, 1)
+  assert.equal(r.离队[0].npcId, 'wangdapeng')
+  assert.ok(r.离队[0].因.includes('膝伤'))
+})
+
+test('认不出的人不当离队处理，记 warning', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '张三丰', 因: 'x' }] })
+  assert.deepEqual(r.离队, [])
+  assert.ok(r.warnings.some((w) => w.includes('张三丰')))
+})
+
+test('本就不在队伍里的人不能被离队', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '踏雪', 因: 'x' }] })
+  assert.deepEqual(r.离队, [])
+  assert.ok(r.warnings.length > 0)
+})
+
+test('已经离队的人不会被重复处理', () => {
+  const s = 局面()
+  s.party.find((p) => p.npcId === 'chenyan').在队 = false
+  const r = validateProposal(s, { 离队: [{ npc: '陈岩', 因: '又走一次' }] })
+  assert.deepEqual(r.离队, [])
+})
+
+test('离队原因过长会被截断', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '陈岩', 因: '啊'.repeat(200) }] })
+  assert.ok(r.离队[0].因.length <= 30, `没截断：${r.离队[0].因.length}`)
+})
+
+test('没有离队字段时 离队 是空数组而不是 undefined', () => {
+  assert.deepEqual(validateProposal(局面(), {}).离队, [])
+})
+```
+
+`test/turn.test.js` 追加：
+
+```js
+test('模型报了离队，引擎真的让人离队', async () => {
+  const s = 局面()
+  const j = createJournal()
+  const r = await runTurn({
+    state: s, journal: j,
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({
+      text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{"离队":[{"npc":"陈岩","因":"膝伤下撤"}]}',
+    }),
+  })
+  assert.equal(r.ok, true)
+  const 陈 = s.party.find((p) => p.npcId === 'chenyan')
+  assert.equal(陈.在队, false, '模型说他走了，引擎却没让他走')
+  assert.equal(陈.状态, '膝伤下撤')
+})
+
+test('离队后好感门槛不再为他放行', async () => {
+  const s = 局面()
+  // 陈岩初始好感 45，门槛 40 本该达标
+  const { gap: 离队前 } = gapFor({ 好感: { chenyan: 40 } }, s)
+  assert.equal(离队前, 0)
+
+  await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({
+      text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{"离队":[{"npc":"陈岩","因":"下撤"}]}',
+    }),
+  })
+  const { gap: 离队后 } = gapFor({ 好感: { chenyan: 40 } }, s)
+  assert.equal(离队后, UNREACHABLE, '人都走了，门槛还放行')
+})
+```
+
+`test/turn.test.js` 顶部导入补上：
+
+```js
+import { gapFor, UNREACHABLE } from '../src/engine/threshold.js'
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npm test -- test/validate.test.js test/turn.test.js`
+Expected: FAIL — `r.离队` 是 undefined
+
+- [ ] **Step 3: 改 validate.js**
+
+`validateProposal` 的 `out` 初始化补上 `离队: []`：
+
+```js
+  const out = { 好感变更: [], 离队: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
+```
+
+在好感那个循环之后插入：
+
+```js
+  // 离队。没有这一段，模型只能在正文里叙述某人下撤，引擎永远不知道——
+  // 下一回合玩家照样能对着他搭话，好感门槛照样为他放行。
+  for (const item of Array.isArray(proposal.离队) ? proposal.离队 : []) {
+    if (!item || typeof item !== 'object') continue
+    const npcId = resolveNpc(item.npc)
+    if (!npcId) {
+      out.warnings.push(`离队提议里认不出这个人：${item.npc}`)
+      continue
+    }
+    const 同伴 = 队伍.find((p) => p.npcId === npcId)
+    if (!同伴) {
+      out.warnings.push(`${item.npc} 本就不在队伍里，忽略离队提议`)
+      continue
+    }
+    if (!同伴.在队) {
+      out.warnings.push(`${item.npc} 已经离队，忽略重复提议`)
+      continue
+    }
+    out.离队.push({ npcId, 因: String(item.因 || '离队').slice(0, 30) })
+  }
+```
+
+- [ ] **Step 4: 在 turn.js 里应用**
+
+导入行补上：
+
+```js
+import { npcLeaves } from './engine/party.js'
+```
+
+在应用好感变更的循环之后插入：
+
+```js
+      for (const 离 of v.离队) {
+        npcLeaves(state, journal, 离.npcId, 离.因)
+      }
+```
+
+- [ ] **Step 5: 教模型这个字段存在**
+
+`src/llm/prompt.js` 的协议说明里，`好感` 字段之后补一条。**照该文件已有的行文风格写**，要点：
+
+- 字段名 `离队`，形如 `"离队":[{"npc":"王大鹏","因":"膝伤严重，从水窝子下撤"}]`
+- **只在剧情真的写了某人离开时才报**，不要因为对方沉默或走得慢就报
+- 离队不可逆，报错了收不回来
+- 「因」控制在 30 字以内
+
+并在 STATE 范例里加上这个字段，让模型有样可循。
+
+- [ ] **Step 6: 跑测试确认通过**
+
+Run: `npm test`
+Expected: 全绿
+
+- [ ] **Step 7: 验证回路真的闭上了**
+
+Run:
+
+```bash
+node --input-type=module -e "
+import { validateProposal } from './src/llm/validate.js'
+import { buildSystemPrompt } from './src/llm/prompt.js'
+console.log('validateProposal 返回字段:', Object.keys(validateProposal({party:[]}, {})).join(', '))
+console.log('system prompt 提到离队:', buildSystemPrompt().includes('离队'))
+"
+```
+
+Expected：字段列表里有 `离队`，且 system prompt 里提到了它。**两者缺一，回路就没闭上。**
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add src/llm/validate.js src/llm/prompt.js src/turn.js test/validate.test.js test/turn.test.js
+git commit -m "feat: 让模型有办法报告队友离队
+
+Task 1 建好了 party.js，却没有任何路径能调到它：validateProposal
+没有离队字段，system prompt 里也一个字没提。模型可以在正文里写
+「王大鹏从水窝子下撤了」，引擎永远不知道——下一回合玩家照样能
+对着他搭话，好感门槛照样为他放行。
+
+和计划一里 失温连败 是同一种毛病：写了模块，没有触发它的路。
+
+现在补上 离队 字段：校验层解析人名、拒绝重复与不存在者，
+编排层调 npcLeaves，system prompt 教模型何时该报。
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 2: 失温判定，让那条结局活过来
 
 计划一评审发现：`ending.js` 会读 `flags.失温连败 >= 3` 判「失败遇险」，但**没有任何模块写过这个字段**。测试是手工把它设成 3 来验条件分支的，通往那里的路并不存在。
@@ -316,11 +531,10 @@ import { removeItem, hasItem } from './state.js'
 import { getGear } from '../data/gear.js'
 ```
 
-在 `const 需要适应晚数 = 1` 下方追加常量：
+在 `const 需要适应晚数 = 1` 下方追加常量（**不要加 `失温连败上限`——`ending.js` 已有同名常量，拼接后会撞车**）：
 
 ```js
 const 毫无保暖 = 99
-const 失温连败上限 = 3
 ```
 
 在 `isAcclimatized` 之后插入：
@@ -484,7 +698,9 @@ const WEATHER_LEVELS = [
   [6, ['大风', '强风', '降雪', '雨夹雪']],
   [5, ['小雨', '阵雨', '霜冻']],
   [4, ['雾', '阴沉', '低云']],
-  [3, ['阴', '转阴']],
+  // 注意 tier 3 用「阴天」而非「阴」：多云转阴 含「阴」，取最高会得 3，
+  // 与「多云转阴 = 2」的断言直接矛盾。关键词要选不会被上层短语包含的写法。
+  [3, ['阴天', '转阴天']],
   [2, ['多云', '微风']],
   [1, ['晴', '无风', '晴朗']],
 ]
@@ -525,8 +741,11 @@ import { validateProposal, clampRequire, clampCost, weatherLevel } from './llm/v
     if (parsed.state.天气建议) {
       // 这是唯一不经 validateProposal 的 LLM 字段（纯展示、不参与任何判定），
       // 但仍要截断——模型偶尔会把整段天气描写塞进来。
-      const 描述 = String(parsed.state.天气建议).slice(0, 40)
-      state.weather = { 状态: 描述, 等级: weatherLevel(描述) }
+      // 先按完整描述解析等级，再截断显示文本。反过来的话，模型写了长句时
+      // 关键词会被切掉——「…傍晚可能暴风雪」截到 40 字只剩「多云」，
+      // 9 级暴风雪静默降成 2 级，没有任何报错。
+      const 全文 = String(parsed.state.天气建议)
+      state.weather = { 状态: 全文.slice(0, 40), 等级: weatherLevel(全文) }
     }
 ```
 
@@ -1055,14 +1274,28 @@ export function esc(v) {
   return String(v).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
 }
 
+// href/src 这类属性走的是 setAttribute，innerHTML 护栏完全扫不到。
+// LLM 写的字符串一旦流进来，玩家点一下链接就执行了——和注入 onerror 是一回事。
+const DOM_URL_ATTRS = new Set(['href', 'src', 'action', 'formaction', 'xlink:href'])
+const DOM_UNSAFE_URL = /^\s*javascript:/i
+
 export function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag)
   for (const [k, v] of Object.entries(attrs)) {
     if (v === null || v === undefined || v === false) continue
     if (k === 'class') node.className = v
     else if (k === 'text') node.textContent = String(v)
-    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v)
-    else node.setAttribute(k, String(v))
+    else if (k.startsWith('on')) {
+      // 只收函数。传字符串的话会掉进下面的 setAttribute，变成 onclick="..." 内联
+      // 处理器——正是本模块存在的理由要杜绝的东西。宁可大声报错也不能悄悄放行。
+      if (typeof v !== 'function') throw new Error(`el(): ${k} 只能接函数，收到 ${typeof v}`)
+      node.addEventListener(k.slice(2), v)
+    } else {
+      if (DOM_URL_ATTRS.has(k) && DOM_UNSAFE_URL.test(String(v))) {
+        throw new Error(`el(): ${k} 不接受 javascript: URL`)
+      }
+      node.setAttribute(k, String(v))
+    }
   }
   for (const c of [].concat(children)) {
     if (c === null || c === undefined || c === false) continue
@@ -1467,8 +1700,14 @@ export function migrateSave(包) {
 }
 
 export function writeSave(storage, slotId, state, journal) {
-  storage.setItem(saveKey(slotId), packSave(state, journal))
-  return true
+  try {
+    storage.setItem(saveKey(slotId), packSave(state, journal))
+    return true
+  } catch (err) {
+    // 配额满时 setItem 抛 QuotaExceededError。无条件返回 true 是撒谎——
+    // 调用方以为存上了，玩家的一整趟就这么没了。返回 false 让 UI 能报出来。
+    return false
+  }
 }
 
 export function readSave(storage, slotId) {
@@ -1667,8 +1906,13 @@ function 脱敏(key) {
 export function configViewModel(raw) {
   const c = normalizeConfig(raw)
   const v = validateConfig(c)
+  // 视图模型里不放明文 key。渲染层只需要 model/baseURL 这些，
+  // 而 vm 一旦被 console.log 或序列化上屏，key 就跟着出去了。
+  // 要存盘时用会话里的完整 config，不要从 vm 里取。
+  const { apiKey, ...展示用配置 } = c
   return {
-    config: c,
+    config: 展示用配置,
+    有key: !!apiKey,
     预设: PRESETS.map((p) => ({ id: p.id, 名称: p.名称, baseURL: p.baseURL, 默认模型: p.默认模型, 选中: p.id === c.presetId })),
     key脱敏: 脱敏(c.apiKey),
     可用: v.ok,
@@ -1736,7 +1980,7 @@ test('12 个人的色相拉得开，不会看起来都一样', () => {
   const 色相 = NPCS.map((n) => portraitTheme(n.id).色相).sort((a, b) => a - b)
   let 最小间隔 = 360
   for (let i = 1; i < 色相.length; i++) 最小间隔 = Math.min(最小间隔, 色相[i] - 色相[i - 1])
-  assert.ok(最小间隔 >= 8, `有两人色相只差 ${最小间隔} 度，肉眼分不出`)
+  assert.ok(最小间隔 >= 25, `有两人色相只差 ${最小间隔} 度——22% 饱和度下那就是两块一样的暗色，肉眼分不出`)
 })
 
 test('生成的是合法 SVG 且不含可执行内容', () => {
@@ -1782,9 +2026,9 @@ export function portraitSeed(id) {
   return h >>> 0
 }
 
-// 色相用黄金角步进而不是取模：取模会让相邻 id 挤在一起，
-// 黄金角能把 12 个人尽量摊开。
-const 黄金角 = 137.508
+// 色相按名单序号均匀铺开，12 个人相隔 30°。靠哈希撒点（无论取模还是
+// 黄金角）都会撞到 10° 以内，而 22% 饱和度下那个距离就是两块一样的暗色——
+// 「一眼分得清谁是谁」是本模块存在的全部理由，达不到就白做了。
 
 export function portraitTheme(id) {
   const s = portraitSeed(id)
@@ -2000,15 +2244,25 @@ export function deriveExperience(draft) {
   return Math.max(0, Math.min(100, 底子 + 技能加成 + 年龄加成 + 微调))
 }
 
+// 这些字段会逐字进入每一次 LLM 请求。不设上限的话，一段几千字的「外貌」
+// 会让此后每个回合的 prompt 都跟着膨胀，玩家每轮都为它付钱。
+const CREATE_LIMITS = { 名字: 12, 职业: 20, 外貌: 60, 技能项: 12 }
+
 export function validateDraft(draft) {
   const 问题 = []
   if (!String(draft.名字 || '').trim()) 问题.push('名字还没填')
+  else if (String(draft.名字).length > CREATE_LIMITS.名字) 问题.push(`名字不能超过 ${CREATE_LIMITS.名字} 字`)
   if (!String(draft.职业 || '').trim()) 问题.push('职业还没填')
+  else if (String(draft.职业).length > CREATE_LIMITS.职业) 问题.push(`职业不能超过 ${CREATE_LIMITS.职业} 字`)
+  if ((draft.技能 || []).some((s) => String(s).length > CREATE_LIMITS.技能项)) {
+    问题.push(`单个技能不能超过 ${CREATE_LIMITS.技能项} 字`)
+  }
   const 年龄 = Number(draft.年龄)
   if (!Number.isFinite(年龄) || 年龄 < 16 || 年龄 > 70) 问题.push('年龄要在 16 到 70 之间')
   if (!['男', '女'].includes(draft.性别)) 问题.push('还没选性别')
   if (!PERSONALITY_TAGS.some((t) => t.id === draft.性格)) 问题.push('还没选性格')
   if (!String(draft.外貌 || '').trim()) 问题.push('外貌还没填')
+  else if (String(draft.外貌).length > CREATE_LIMITS.外貌) 问题.push(`外貌不能超过 ${CREATE_LIMITS.外貌} 字`)
   if ((draft.技能 || []).length !== 3) 问题.push('技能要正好选 3 个')
   return { ok: 问题.length === 0, 问题 }
 }
@@ -2157,7 +2411,7 @@ Expected: FAIL — 模块不存在
 `src/ui/screen-draw.js`：
 
 ```js
-import { RANDOM_POOL, getNpc } from '../data/npcs.js'
+import { RANDOM_POOL, getNpc, PERSONALITY_TAGS } from '../data/npcs.js'
 import { initialAffinity } from '../engine/affinity.js'
 import { rollInt } from '../engine/rng.js'
 import { portraitSvg } from './portrait.js'
@@ -2169,6 +2423,11 @@ const 抽取人数 = 2
 // 从 10 位随机配角里抽 2 个。两位重要配角（踏雪、猛蛇过江）不在池里——
 // 他们要在途中遭遇，开局就同行会毁掉那份分量。
 export function drawCompanions(rng, 性格id) {
+  // 性格 id 打错时 initialAffinity 会静默返回基准值，全队好感齐刷刷 25——
+  // 看起来毫无异常，实际整个性格匹配机制没生效。宁可在这里炸掉。
+  if (!PERSONALITY_TAGS.some((t) => t.id === 性格id)) {
+    throw new Error(`drawCompanions: 认不出的性格标签「${性格id}」，好感匹配会静默失效`)
+  }
   const 池 = [...RANDOM_POOL]
   const 结果 = []
   for (let i = 0; i < 抽取人数; i++) {
@@ -2406,7 +2665,12 @@ export const START_MONEY = 10000
 const SHOP_CARRY_LIMIT = 30
 
 // 没有它就上不了山的东西。缺件清单点名的就是这些。
-const SHOP_ESSENTIALS = ['backpack', 'tent', 'sleeping_bag', 'sleeping_pad', 'stove', 'staple_food', 'headlamp', 'first_aid', 'water_filter']
+// 每项给一组可接受的 id：睡袋有普通款和极寒款两种，带哪个都算带了睡袋。
+// 只认单一 id 的话，冬季玩家会被要求同时带两个睡袋——没人会背两个睡袋上山。
+const SHOP_ESSENTIALS = [
+  ['backpack'], ['tent'], ['sleeping_bag', 'winter_bag'], ['sleeping_pad'],
+  ['stove'], ['staple_food'], ['headlamp'], ['first_aid'], ['water_filter'],
+]
 
 // 购物车形状：{ [gearId]: 档名 }。用最扁的结构，存档和比对都省事。
 export function toggleItem(cart, gearId, 档) {
@@ -2440,9 +2704,15 @@ export function cartTotals(cart) {
 // 约束是硬的——必须买得起、不超重、无缺件，否则这个按钮就是在坑玩家。
 export function recommendedCart(季节) {
   let cart = {}
-  for (const id of SHOP_ESSENTIALS) {
-    const g = getGear(id)
-    if (g) cart[id] = g.档次[0].档
+  for (const [首选] of SHOP_ESSENTIALS) {
+    const g = getGear(首选)
+    if (g) cart[首选] = g.档次[0].档
+  }
+  // 冬季夜里 -25℃，普通睡袋加内胆也只到 -15℃。不换极寒款的话，「一键推荐」
+  // 会让玩家带着扛不住的睡袋出发，而那条警告正是 Task 3B 专门为了能消除才加的。
+  if (季节 === '冬季') {
+    delete cart.sleeping_bag
+    cart.winter_bag = getGear('winter_bag').档次[0].档
   }
   cart.freeze_dried = getGear('freeze_dried').档次[0].档
   cart.trail_snack = getGear('trail_snack').档次[0].档
@@ -2458,7 +2728,10 @@ export function recommendedCart(季节) {
   // 求救设备排在所有升级之前。源文档四个季节的「推荐准备」里都写了卫星通讯设备，
   // 而卫星电话只要 ¥750——一个剩着一半预算却不给配求救设备的「推荐」，是在害人。
   // 缺件清单里不放它（要不要冒这个险是玩家的选择），但推荐配置必须给。
-  const 可加 = [['sat_phone', '租用'], ['sleeping_bag', '主流'], ['water_filter', '主流'], ['headlamp', '主流'], ['bag_liner', '通用']]
+  const 可加 = [['sat_phone', '租用'], ['water_filter', '主流'], ['headlamp', '主流'], ['bag_liner', '通用']]
+  // 只升级车里实际有的那个睡袋。无条件写进列表的话，冬季刚换掉的普通睡袋
+  // 会被原样加回来，玩家背两个睡袋上山。
+  if (cart.sleeping_bag) 可加.splice(1, 0, ['sleeping_bag', '主流'])
   for (const [id, 档] of 可加) {
     const 试 = { ...cart, [id]: 档 }
     const t = cartTotals(试)
@@ -2492,7 +2765,9 @@ export function shopViewModel({ cart, 季节 }) {
     })
   }
 
-  const 缺件 = SHOP_ESSENTIALS.filter((id) => !cart[id]).map((id) => ({ id, 名称: getGear(id)?.名称 || id }))
+  const 缺件 = SHOP_ESSENTIALS
+    .filter((可选) => !可选.some((id) => cart[id]))
+    .map(([首选]) => ({ id: 首选, 名称: getGear(首选)?.名称 || 首选 }))
   const 超重 = 合计.总重 > SHOP_CARRY_LIMIT
   const 超支 = 合计.总价 > START_MONEY
 
@@ -2719,3 +2994,20 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## 不在本计划范围
 
 主界面（双栏仪表盘 + 立绘舞台 + 剧情流 + 选项区）、结局页、徒步阶段的回合循环——全部留给计划三。本计划完成时，点「出发」会提示「计划三将接上徒步阶段」。
+
+
+---
+
+## 留给计划三的两条
+
+**1. `textContent` 会吃掉换行——LLM 正文的分段会消失。**
+
+`src/styles.css` 里没有任何 `white-space` 规则，默认 `normal` 会把 `\n` 折叠成空格。直接 `setText(节点, 剧情)` 会让「段落一\n\n段落二」渲染成「段落一 段落二」。
+
+正确做法不是退回 `innerHTML`，而是按 `\n\n` 切段，每段一个 `el('p')` + `setText`，全程留在 `textContent` 里。或者给剧情容器加 `white-space: pre-wrap`。
+
+**2. `isHarshWeather` 与 `sleep()` 还没接上。**
+
+Task 3 定义了 `isHarshWeather(state.weather)`（等级 ≥6 即恶劣），但 `sleep(state, { 恶劣天气 })` 仍要调用方自己传，而 `turn.js` 目前**根本没有调用 `sleep()`**——夜间阶段还没做。
+
+计划三接主循环时必须把这条接上：`sleep(state, { 恶劣天气: isHarshWeather(state.weather) })`。忘了接，`isHarshWeather` 就是第三个死代码（前两个是 `失温连败` 和 `party.js`，都是这样被发现的）。

@@ -1,9 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { writeFileSync, unlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { writeFileSync, unlinkSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { stripModuleSyntax, buildScript, assertModuleOrderComplete, assertHtmlPlaceholders } from '../build.mjs'
+import { stripModuleSyntax, buildScript, assertModuleOrderComplete, assertHtmlPlaceholders, buildHtml } from '../build.mjs'
+const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -141,4 +142,16 @@ test('assertHtmlPlaceholders 在 __STYLES__ 占位符缺失时抛出错误', () 
     },
     '__STYLES__ 缺失时应抛错',
   )
+})
+
+test('buildHtml 把 styles.css 注进去，不再是空字符串', () => {
+  const html = buildHtml()
+  assert.ok(!html.includes('__STYLES__'), '占位符没被替换')
+  assert.ok(html.includes('--bg-deep'), '主题变量没进产物')
+  assert.ok(/<style>[\s\S]{200,}<\/style>/.test(html), '样式内容过短，可能没读到文件')
+})
+
+test('样式里不得出现会破坏 HTML 的闭合标签', () => {
+  const css = readFileSync(join(ROOT_DIR, 'src/styles.css'), 'utf8')
+  assert.ok(!css.includes('</style'), 'CSS 里出现 </style 会提前闭合样式块')
 })

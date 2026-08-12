@@ -17,11 +17,21 @@ export const MODULE_ORDER = [
   'src/engine/affinity.js',
   'src/engine/ending.js',
   'src/engine/journal.js',
+  'src/engine/party.js',
   'src/llm/parser.js',
   'src/llm/validate.js',
   'src/llm/prompt.js',
   'src/llm/client.js',
   'src/turn.js',
+  'src/ui/dom.js',
+  'src/ui/router.js',
+  'src/ui/save.js',
+  'src/ui/config.js',
+  'src/ui/portrait.js',
+  'src/ui/screen-create.js',
+  'src/ui/screen-draw.js',
+  'src/ui/screen-shop.js',
+  'src/ui/app.js',
 ]
 
 // 只删真正的 import 语句（必须有 from 子句或裸副作用导入），
@@ -77,7 +87,11 @@ export function assertHtmlPlaceholders(html) {
 export function buildHtml() {
   const shell = readFileSync(join(ROOT, 'src/index.html'), 'utf8')
   assertHtmlPlaceholders(shell)
-  return shell.replace('__STYLES__', '').replace('__SCRIPT__', buildScript())
+  const styles = readFileSync(join(ROOT, 'src/styles.css'), 'utf8')
+  if (styles.includes('</style')) {
+    throw new Error('src/styles.css 含 </style，会提前闭合样式块')
+  }
+  return shell.replace('__STYLES__', styles).replace('__SCRIPT__', buildScript())
 }
 
 // 仅在直接执行时写盘，被 import 时不产生副作用

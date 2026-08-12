@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveNpc, clampRequire, clampCost, validateProposal, CLAMP_TABLE } from '../src/llm/validate.js'
+import { resolveNpc, clampRequire, clampCost, validateProposal, weatherLevel, isHarshWeather, CLAMP_TABLE } from '../src/llm/validate.js'
 
 function 状态() {
   return {
@@ -180,4 +180,84 @@ test('validateProposal 从不抛异常', () => {
   for (const p of 恶意) {
     assert.doesNotThrow(() => validateProposal(状态(), p), JSON.stringify(p))
   }
+})
+
+function 局面() {
+  return {
+    place: { nodeId: 'maijieling', 海拔: 3500 },
+    party: [
+      { npcId: 'chenyan', 好感: 45, 在队: true },
+      { npcId: 'wangdapeng', 好感: 30, 在队: true },
+    ],
+    pack: [],
+  }
+}
+
+test('离队提议按名字解析，写进 离队', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '王大鹏', 因: '膝伤严重，从水窝子下撤' }] })
+  assert.equal(r.离队.length, 1)
+  assert.equal(r.离队[0].npcId, 'wangdapeng')
+  assert.ok(r.离队[0].因.includes('膝伤'))
+})
+
+test('认不出的人不当离队处理，记 warning', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '张三丰', 因: 'x' }] })
+  assert.deepEqual(r.离队, [])
+  assert.ok(r.warnings.some((w) => w.includes('张三丰')))
+})
+
+test('本就不在队伍里的人不能被离队', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '踏雪', 因: 'x' }] })
+  assert.deepEqual(r.离队, [])
+  assert.ok(r.warnings.length > 0)
+})
+
+test('已经离队的人不会被重复处理', () => {
+  const s = 局面()
+  s.party.find((p) => p.npcId === 'chenyan').在队 = false
+  const r = validateProposal(s, { 离队: [{ npc: '陈岩', 因: '又走一次' }] })
+  assert.deepEqual(r.离队, [])
+})
+
+test('离队原因过长会被截断', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '陈岩', 因: '啊'.repeat(200) }] })
+  assert.ok(r.离队[0].因.length <= 30, `没截断：${r.离队[0].因.length}`)
+})
+
+test('没有离队字段时 离队 是空数组而不是 undefined', () => {
+  assert.deepEqual(validateProposal(局面(), {}).离队, [])
+})
+
+test('天气等级按关键词解析，多个命中取最高', () => {
+  assert.equal(weatherLevel('晴'), 1)
+  assert.equal(weatherLevel('多云转阴'), 2)
+  assert.equal(weatherLevel('起雾了'), 4)
+  assert.equal(weatherLevel('大风'), 6)
+  assert.equal(weatherLevel('暴雨'), 7)
+  assert.equal(weatherLevel('暴风雪'), 9)
+  assert.equal(weatherLevel('白化天'), 10)
+  // 多个关键词取最高
+  assert.equal(weatherLevel('大风转暴风雪'), 9)
+})
+
+test('认不出的天气描述给中间值，不是 0 也不是 10', () => {
+  const lv = weatherLevel('天色不明')
+  assert.ok(lv >= 3 && lv <= 5, `认不出时应给中间值，实为 ${lv}`)
+})
+
+test('天气等级 >= 6 视为恶劣', () => {
+  assert.equal(isHarshWeather({ 等级: 5 }), false)
+  assert.equal(isHarshWeather({ 等级: 6 }), true)
+  assert.equal(isHarshWeather({ 等级: 10 }), true)
+  assert.equal(isHarshWeather(undefined), false)
+})
+
+test('空描述与非字符串不炸', () => {
+  assert.equal(typeof weatherLevel(''), 'number')
+  assert.equal(typeof weatherLevel(null), 'number')
+  assert.equal(typeof weatherLevel(123), 'number')
 })

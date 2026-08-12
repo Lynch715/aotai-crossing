@@ -1,11 +1,14 @@
 import { getNode } from '../data/route.js'
+import { getSeason } from '../data/seasons.js'
 import { removeItem, hasItem } from './state.js'
+import { getGear } from '../data/gear.js'
 
 const 基础时段消耗 = 6
 const 负重基准线 = 15
 const 高海拔线 = 3400
 const 适应海拔线 = 3000
 const 需要适应晚数 = 1
+const 毫无保暖 = 99
 const 每次热食耗气 = 8
 const 每日主粮 = 2
 
@@ -15,6 +18,23 @@ const SLOTS = ['早', '中', '晚']
 // 这让前两天在 2900 营地慢慢爬高有了现实意义，也让「一天冲上 3500」要付代价。
 export function isAcclimatized(state) {
   return state.flags.高海拔过夜数 >= 需要适应晚数
+}
+
+// 有效温标 = 最保暖那件睡袋的温标 − 内胆加成。数字越低越保暖。
+// 没带睡袋记 +99：不是「有点冷」，是根本没有保暖可言。
+// 遍历所有睡袋而不是写死 sleeping_bag——装备表里不止一款，写死会让
+// 花大价钱买的极寒睡袋毫无作用，且没有任何测试会发现。
+const 睡袋清单 = ['sleeping_bag', 'winter_bag']
+
+export function effectiveWarmth(state) {
+  const 温标表 = 睡袋清单
+    .filter((id) => hasItem(state, id))
+    .map((id) => getGear(id)?.温标)
+    .filter((v) => typeof v === 'number')
+  if (!温标表.length) return 毫无保暖
+  const 最暖 = Math.min(...温标表)
+  const 加成 = hasItem(state, 'bag_liner') ? (getGear('bag_liner')?.温标加成 ?? 0) : 0
+  return 最暖 - 加成
 }
 
 export function stepStaminaCost(state) {
@@ -73,6 +93,17 @@ export function sleep(state, { 恶劣天气 = false } = {}) {
   调整体力(state, 条件好 ? 25 : 12)
 
   if (node && node.海拔 >= 适应海拔线) state.flags.高海拔过夜数 += 1
+
+  // 失温判定：夜里比睡袋扛得住的还冷，就算一次失温。连续 失温连败上限 次
+  // 触发「失败遇险」结局（见 ending.js）。这里只记账，不再叠加体力惩罚——
+  // 睡眠回复的 25/12 是被测试钉死的设计值，二次惩罚会让手感失控。
+  const 季节 = getSeason(state.meta.季节)
+  if (季节 && 季节.夜间温度 < effectiveWarmth(state)) {
+    state.flags.失温连败 += 1
+  } else {
+    state.flags.失温连败 = 0
+  }
+
   return state
 }
 
