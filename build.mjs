@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -16,7 +16,7 @@ export const MODULE_ORDER = [
 // 一旦某行以 "export 你的数据" 或 "import 一段说明" 开头就会被静默改写或整行删掉。
 // Task 15 的 system prompt 是一大段多行模板，正好是重灾区，而且测试跑的是 src/
 // 的 ESM 原文、不是拼接产物，这种损坏永远测不出来。
-const IMPORT_LINE = /^import\s+[^'"]*from\s+['"][^'"]+['"];?\s*$|^import\s+['"][^'"]+['"];?\s*$/
+const IMPORT_LINE = /^import\s+[^'"]*from\s+['"][^'"]+['"];?\s*(\/\/.*|\/\*.*\*\/)?\s*$|^import\s+['"][^'"]+['"];?\s*(\/\/.*|\/\*.*\*\/)?\s*$/
 const EXPORT_KEYWORD = /^export\s+(?=(async\s+)?(function|const|let|var|class)\s)/
 
 export function stripModuleSyntax(source) {
@@ -27,7 +27,26 @@ export function stripModuleSyntax(source) {
     .join('\n')
 }
 
+// 防呆：src/ 下每个 .js 都必须登记进 MODULE_ORDER，否则产物会静默缺模块。
+function findSourceModules(dir = 'src') {
+  const out = []
+  for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+    const rel = `${dir}/${entry.name}`
+    if (entry.isDirectory()) out.push(...findSourceModules(rel))
+    else if (entry.name.endsWith('.js')) out.push(rel)
+  }
+  return out
+}
+
+export function assertModuleOrderComplete() {
+  const missing = findSourceModules().filter((f) => !MODULE_ORDER.includes(f))
+  if (missing.length) {
+    throw new Error(`以下模块未登记进 MODULE_ORDER，不会进入产物：\n  ${missing.join('\n  ')}`)
+  }
+}
+
 export function buildScript() {
+  assertModuleOrderComplete()
   const bodies = MODULE_ORDER.map((rel) => {
     const src = readFileSync(join(ROOT, rel), 'utf8')
     return `// ===== ${rel} =====\n${stripModuleSyntax(src)}`
@@ -35,8 +54,14 @@ export function buildScript() {
   return `;(function () {\n'use strict'\n${bodies.join('\n')}\n})();`
 }
 
+export function assertHtmlPlaceholders(html) {
+  if (!html.includes('__STYLES__')) throw new Error('src/index.html 缺少 __STYLES__ 占位符，产物将不含样式')
+  if (!html.includes('__SCRIPT__')) throw new Error('src/index.html 缺少 __SCRIPT__ 占位符，产物将不含脚本')
+}
+
 export function buildHtml() {
   const shell = readFileSync(join(ROOT, 'src/index.html'), 'utf8')
+  assertHtmlPlaceholders(shell)
   return shell.replace('__STYLES__', '').replace('__SCRIPT__', buildScript())
 }
 
