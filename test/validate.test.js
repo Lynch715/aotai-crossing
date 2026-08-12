@@ -121,8 +121,11 @@ test('记忆与伏笔原样透传，空白项被剔除', () => {
 })
 
 test('地名前缀必须唯一才认，含糊的一律驳回', () => {
-  // 「大」同时前缀匹配 大爷海 与 大文公庙，靠数组顺序决定去哪儿等于让手滑决定
-  assert.equal(validateProposal(状态(), { 去向建议: '大' }).去向, null)
+  // 「大」同时前缀匹配 大爷海 与 大文公庙。必须站在大爷海的相邻节点上测，
+  // 否则是相邻判定兜住了它，而不是唯一前缀规则在起作用。
+  const 在拔仙台 = { ...状态(), place: { nodeId: 'baxiantai', 海拔: 3767 } }
+  assert.equal(validateProposal(在拔仙台, { 去向建议: '大爷海' }).去向, 'dayehai', '精确名该认')
+  assert.equal(validateProposal(在拔仙台, { 去向建议: '大' }).去向, null, '含糊前缀必须驳回')
   // 唯一前缀仍然认
   assert.equal(validateProposal({ ...状态(), place: { nodeId: 'yaowangdong', 海拔: 3360 } }, { 去向建议: '麦秸' }).去向, 'maijieling')
 })
