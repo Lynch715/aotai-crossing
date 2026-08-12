@@ -2665,7 +2665,12 @@ export const START_MONEY = 10000
 const SHOP_CARRY_LIMIT = 30
 
 // 没有它就上不了山的东西。缺件清单点名的就是这些。
-const SHOP_ESSENTIALS = ['backpack', 'tent', 'sleeping_bag', 'sleeping_pad', 'stove', 'staple_food', 'headlamp', 'first_aid', 'water_filter']
+// 每项给一组可接受的 id：睡袋有普通款和极寒款两种，带哪个都算带了睡袋。
+// 只认单一 id 的话，冬季玩家会被要求同时带两个睡袋——没人会背两个睡袋上山。
+const SHOP_ESSENTIALS = [
+  ['backpack'], ['tent'], ['sleeping_bag', 'winter_bag'], ['sleeping_pad'],
+  ['stove'], ['staple_food'], ['headlamp'], ['first_aid'], ['water_filter'],
+]
 
 // 购物车形状：{ [gearId]: 档名 }。用最扁的结构，存档和比对都省事。
 export function toggleItem(cart, gearId, 档) {
@@ -2699,9 +2704,15 @@ export function cartTotals(cart) {
 // 约束是硬的——必须买得起、不超重、无缺件，否则这个按钮就是在坑玩家。
 export function recommendedCart(季节) {
   let cart = {}
-  for (const id of SHOP_ESSENTIALS) {
-    const g = getGear(id)
-    if (g) cart[id] = g.档次[0].档
+  for (const [首选] of SHOP_ESSENTIALS) {
+    const g = getGear(首选)
+    if (g) cart[首选] = g.档次[0].档
+  }
+  // 冬季夜里 -25℃，普通睡袋加内胆也只到 -15℃。不换极寒款的话，「一键推荐」
+  // 会让玩家带着扛不住的睡袋出发，而那条警告正是 Task 3B 专门为了能消除才加的。
+  if (季节 === '冬季') {
+    delete cart.sleeping_bag
+    cart.winter_bag = getGear('winter_bag').档次[0].档
   }
   cart.freeze_dried = getGear('freeze_dried').档次[0].档
   cart.trail_snack = getGear('trail_snack').档次[0].档
@@ -2717,7 +2728,10 @@ export function recommendedCart(季节) {
   // 求救设备排在所有升级之前。源文档四个季节的「推荐准备」里都写了卫星通讯设备，
   // 而卫星电话只要 ¥750——一个剩着一半预算却不给配求救设备的「推荐」，是在害人。
   // 缺件清单里不放它（要不要冒这个险是玩家的选择），但推荐配置必须给。
-  const 可加 = [['sat_phone', '租用'], ['sleeping_bag', '主流'], ['water_filter', '主流'], ['headlamp', '主流'], ['bag_liner', '通用']]
+  const 可加 = [['sat_phone', '租用'], ['water_filter', '主流'], ['headlamp', '主流'], ['bag_liner', '通用']]
+  // 只升级车里实际有的那个睡袋。无条件写进列表的话，冬季刚换掉的普通睡袋
+  // 会被原样加回来，玩家背两个睡袋上山。
+  if (cart.sleeping_bag) 可加.splice(1, 0, ['sleeping_bag', '主流'])
   for (const [id, 档] of 可加) {
     const 试 = { ...cart, [id]: 档 }
     const t = cartTotals(试)
@@ -2751,7 +2765,9 @@ export function shopViewModel({ cart, 季节 }) {
     })
   }
 
-  const 缺件 = SHOP_ESSENTIALS.filter((id) => !cart[id]).map((id) => ({ id, 名称: getGear(id)?.名称 || id }))
+  const 缺件 = SHOP_ESSENTIALS
+    .filter((可选) => !可选.some((id) => cart[id]))
+    .map(([首选]) => ({ id: 首选, 名称: getGear(首选)?.名称 || 首选 }))
   const 超重 = 合计.总重 > SHOP_CARRY_LIMIT
   const 超支 = 合计.总价 > START_MONEY
 

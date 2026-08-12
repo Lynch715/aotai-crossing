@@ -150,3 +150,26 @@ test('转成 createInitialState 要的背包格式', () => {
     assert.ok(tierOf(it.gearId, it.档), `${it.gearId}/${it.档} 不是合法档次`)
   }
 })
+
+test('冬季推荐配置必须换上极寒睡袋，一条警告都不许剩', () => {
+  const 车 = recommendedCart('冬季')
+  assert.ok(车.winter_bag, '冬季推荐没带极寒睡袋')
+  assert.equal(车.sleeping_bag, undefined, '不该同时背两个睡袋')
+  const vm = shopViewModel({ cart: 车, 季节: '冬季' })
+  assert.deepEqual(vm.警告, [], `冬季推荐仍剩警告：${vm.警告.join('｜')}`)
+  assert.deepEqual(vm.缺件, [], '极寒睡袋应当满足睡袋这项必备')
+  assert.ok(vm.总价 <= START_MONEY && !vm.超重)
+})
+
+test('四季推荐配置都不留警告', () => {
+  for (const 季节 of ['春季', '夏季', '秋季', '冬季']) {
+    const vm = shopViewModel({ cart: recommendedCart(季节), 季节 })
+    assert.deepEqual(vm.警告, [], `${季节} 剩着：${vm.警告.join('｜')}`)
+  }
+})
+
+test('带极寒睡袋就不算缺睡袋', () => {
+  const 车 = { backpack: '经济', tent: '经济', winter_bag: '通用', sleeping_pad: '经济',
+               stove: '经济', staple_food: '经济', headlamp: '经济', first_aid: '基础', water_filter: '经济' }
+  assert.deepEqual(shopViewModel({ cart: 车, 季节: '冬季' }).缺件, [])
+})
