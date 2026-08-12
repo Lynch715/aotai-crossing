@@ -127,6 +127,7 @@ export async function runTurn({
     结果.warnings.push(...v.warnings)
 
     for (const c of v.好感变更) applyAffinityDelta(state, c.npcId, c.delta, { 重大: c.重大 })
+    结果.说话人 = v.说话人
     for (const 离 of v.离队) {
       npcLeaves(state, journal, 离.npcId, 离.因)
     }

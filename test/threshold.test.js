@@ -116,3 +116,20 @@ test('边缘档长期成功率贴近标称概率', () => {
   const 实测 = 成功 / 4000
   assert.ok(Math.abs(实测 - 0.62) < 0.03, `实测 ${实测}`)
 })
+
+test('理由里写中文名，不泄漏内部 id', () => {
+  const { reasons } = gapFor({ 好感: { linxiaoya: 70 } }, 状态())
+  assert.ok(reasons[0].includes('林晓雅'), `没用中文名：${reasons[0]}`)
+  assert.ok(!reasons[0].includes('linxiaoya'), `泄漏了 id：${reasons[0]}`)
+})
+
+test('人不在队的理由也用中文名', () => {
+  const { reasons } = gapFor({ 好感: { wangdapeng: 30 } }, 状态())
+  assert.ok(reasons[0].includes('王大鹏'), `没用中文名：${reasons[0]}`)
+})
+
+test('缺物品的理由写装备中文名', () => {
+  const { reasons } = gapFor({ 物品: ['crampons'] }, 状态())
+  assert.ok(reasons[0].includes('冰爪'), `没用中文名：${reasons[0]}`)
+  assert.ok(!reasons[0].includes('crampons'), `泄漏了 id：${reasons[0]}`)
+})
