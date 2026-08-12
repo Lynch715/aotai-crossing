@@ -22,6 +22,9 @@
 2. **导入必须单行**：`import { foo, bar } from './x.js'`。禁止跨行导入、禁止 `import * as ns`。
 3. **模块顶层不得有同名标识符**：拼接后所有模块共享一个作用域，重名会直接覆盖。命名带模块前缀（如 `judgeOption`、`applyConsume`）。
 4. 行首的 `import` / `export` 关键字前不得有缩进。
+5. **模块私有常量也必须带模块前缀**。这是第 3 条最容易被忽略的一半——`const BY_ID = new Map(...)` 这种查表常量每个数据模块都想要一个，四个模块写四遍就是四重覆盖。一律写成 `ROUTE_BY_ID` / `NPC_BY_ID` / `GEAR_BY_ID` / `SEASON_BY_ID`。同理适用于 `SECTIONS`、`SLOTS`、`DEFAULTS` 这类通用名。
+
+> 违反第 3、5 条不会静默：`test/build.test.js` 的「bundle 可求值」用例会在拼接产物里撞出 `Identifier 'X' has already been declared` 并失败。但**命名冲突要在写代码时就避免，别指望测试兜底**——等到第 12 个模块才发现，改动面就大了。
 
 ---
 
@@ -499,17 +502,17 @@ export const MAIN_PATH = [
 ]
 
 // 主路径之外的额外连接：备用起点、南北下撤线
-const EXTRA_LINKS = [
+const ROUTE_EXTRA_LINKS = [
   ['miaopu', 'huoshaopo'],
   ['shuiwozi', 'hetaoping'],
   ['yingdi2800', 'hetaoping'],
   ['yingdi2800', 'songpingsi'],
 ]
 
-const BY_ID = new Map(ROUTE.map((n) => [n.id, n]))
+const ROUTE_BY_ID = new Map(ROUTE.map((n) => [n.id, n]))
 
 export function getNode(id) {
-  return BY_ID.get(id)
+  return ROUTE_BY_ID.get(id)
 }
 
 export function isAdjacent(fromId, toId) {
@@ -517,7 +520,7 @@ export function isAdjacent(fromId, toId) {
   const i = MAIN_PATH.indexOf(fromId)
   const j = MAIN_PATH.indexOf(toId)
   if (i !== -1 && j !== -1 && Math.abs(i - j) === 1) return true
-  return EXTRA_LINKS.some(
+  return ROUTE_EXTRA_LINKS.some(
     ([a, b]) => (a === fromId && b === toId) || (a === toId && b === fromId)
   )
 }
@@ -689,10 +692,10 @@ export const PERSONALITY_TAGS = [
   { id: 'weifengjing', 文案: '为风景可以吃苦', 轴: [1, 0, 0, 1] },
 ]
 
-const BY_ID = new Map(NPCS.map((n) => [n.id, n]))
+const NPC_BY_ID = new Map(NPCS.map((n) => [n.id, n]))
 
 export function getNpc(id) {
-  return BY_ID.get(id)
+  return NPC_BY_ID.get(id)
 }
 ```
 
@@ -943,14 +946,14 @@ export const EXTRA_GEAR = [
 
 export const ALL_GEAR = [...GEAR, ...EXTRA_GEAR]
 
-const BY_ID = new Map(ALL_GEAR.map((g) => [g.id, g]))
+const GEAR_BY_ID = new Map(ALL_GEAR.map((g) => [g.id, g]))
 
 export function getGear(id) {
-  return BY_ID.get(id)
+  return GEAR_BY_ID.get(id)
 }
 
 export function tierOf(gearId, 档名) {
-  const g = BY_ID.get(gearId)
+  const g = GEAR_BY_ID.get(gearId)
   if (!g) return undefined
   return g.档次.find((t) => t.档 === 档名)
 }
@@ -1103,10 +1106,10 @@ export const SEASONS = [
     推荐准备: ['极寒睡袋（-20℃以下）', '羽绒服+硬壳', '雪镜', '防冻液', '卫星电话', '团队协作绝不独行'] },
 ]
 
-const BY_ID = new Map(SEASONS.map((s) => [s.id, s]))
+const SEASON_BY_ID = new Map(SEASONS.map((s) => [s.id, s]))
 
 export function getSeason(id) {
-  return BY_ID.get(id)
+  return SEASON_BY_ID.get(id)
 }
 
 export function rollSeason(rng) {
@@ -1115,7 +1118,7 @@ export function rollSeason(rng) {
 
 // 采购界面的季节警告。ownedIds 为已选物资 id 数组。
 export function gearWarnings(seasonId, ownedIds) {
-  const season = BY_ID.get(seasonId)
+  const season = SEASON_BY_ID.get(seasonId)
   if (!season) return []
   const owned = new Set(ownedIds)
   const 警告 = []

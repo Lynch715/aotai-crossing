@@ -63,17 +63,17 @@ export const MAIN_PATH = [
 ]
 
 // 主路径之外的额外连接：备用起点、南北下撤线
-const EXTRA_LINKS = [
+const ROUTE_EXTRA_LINKS = [
   ['miaopu', 'huoshaopo'],
   ['shuiwozi', 'hetaoping'],
   ['yingdi2800', 'hetaoping'],
   ['yingdi2800', 'songpingsi'],
 ]
 
-const BY_ID = new Map(ROUTE.map((n) => [n.id, n]))
+const ROUTE_BY_ID = new Map(ROUTE.map((n) => [n.id, n]))
 
 export function getNode(id) {
-  return BY_ID.get(id)
+  return ROUTE_BY_ID.get(id)
 }
 
 export function isAdjacent(fromId, toId) {
@@ -81,7 +81,7 @@ export function isAdjacent(fromId, toId) {
   const i = MAIN_PATH.indexOf(fromId)
   const j = MAIN_PATH.indexOf(toId)
   if (i !== -1 && j !== -1 && Math.abs(i - j) === 1) return true
-  return EXTRA_LINKS.some(
+  return ROUTE_EXTRA_LINKS.some(
     ([a, b]) => (a === fromId && b === toId) || (a === toId && b === fromId)
   )
 }
