@@ -244,3 +244,32 @@ test('onDelta 被透传给客户端，用于打字机上屏', async () => {
   })
   assert.equal(typeof 透传到, 'function')
 })
+
+test('已结束的局不再推进', async () => {
+  const s = 局面()
+  s.phase = '结局'
+  s.ending = { type: '成功穿越', 原因: '走到了下板寺' }
+  let 调用了 = false
+  const r = await runTurn({
+    state: s, journal: createJournal(), 选中项: { id: 'A', 文本: '继续', 类型: '徒步' },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => { 调用了 = true; return { text: '' } },
+  })
+  assert.equal(r.ok, false)
+  assert.equal(r.error.kind, 'ended')
+  assert.equal(调用了, false, '结束后不该再花钱调模型')
+})
+
+test('选项门槛在判定前会被重新夹取，不靠调用方自觉', async () => {
+  const s = 局面()
+  s.pc.户外经验 = 38
+  // UI 若错传了未夹取的原始提议：社交类经验门槛上限是 30，5000 应被夹到 30
+  const r = await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '搭话', 类型: '社交', require: { 经验: 5000 }, cost: { 体力: -50 } },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({ text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{}' }),
+  })
+  // 夹到 30 后差距只有 -8（已达标），而非 4962
+  assert.equal(r.判定.gap, 0, `门槛没被重夹，gap = ${r.判定.gap}`)
+})

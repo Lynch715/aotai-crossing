@@ -4472,7 +4472,7 @@ import { recordNode, recordEvent, addForeshadow, resolveForeshadow, compressJour
 import { getNode } from './data/route.js'
 import { buildSystemPrompt, buildUserMessage, buildRepairMessage } from './llm/prompt.js'
 import { parseTurn } from './llm/parser.js'
-import { validateProposal } from './llm/validate.js'
+import { validateProposal, clampRequire, clampCost } from './llm/validate.js'
 import { streamChat } from './llm/client.js'
 
 export const MAX_REPAIR = 2
@@ -4498,11 +4498,22 @@ export async function runTurn({
   state, journal, 选中项, 最近回合 = [], config,
   onDelta, streamImpl = streamChat, rng,
 }) {
+  // 已经落幕的局不再推进。引擎不拦的话，UI 多点一次就会又算出一个结局对象。
+  if (state.phase === '结局') {
+    return { ok: false, 降级: false, error: { kind: 'ended', 提示: '这一局已经结束了。' }, ending: state.ending }
+  }
+
   const snap = snapshot(state)
   const 档案快照 = JSON.stringify(journal)
 
   try {
     // —— 判定先行 ——
+    // 防御性重夹：选项的 require/cost 本该是上回合 validateProposal 夹取过的版本，
+    // 但那全靠 UI 自觉存对东西。这里再夹一次，夹取就与调用方的纪律无关了。
+    const { require: 净门槛 } = clampRequire(选中项.类型, 选中项.require)
+    const { cost: 净代价 } = clampCost(选中项.cost)
+    选中项 = { ...选中项, require: 净门槛, cost: 净代价 }
+
     const 判定 = judgeOption(选中项, state, rng || (() => 0.5))
     const 体力前 = state.pc.体力
     const 日前 = state.clock.day
