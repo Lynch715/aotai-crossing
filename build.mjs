@@ -25,6 +25,7 @@ export const MODULE_ORDER = [
   'src/turn.js',
   'src/ui/dom.js',
   'src/ui/router.js',
+  'src/ui/save.js',
 ]
 
 // 只删真正的 import 语句（必须有 from 子句或裸副作用导入），
