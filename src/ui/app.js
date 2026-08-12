@@ -9,6 +9,7 @@ import { createViewModel, randomDraft, deriveExperience } from './screen-create.
 import { drawCompanions, drawViewModel } from './screen-draw.js'
 import { shopViewModel, toggleItem, setTier, recommendedCart, START_MONEY } from './screen-shop.js'
 import { rollSeason, getSeason } from '../data/seasons.js'
+import { getNpc } from '../data/npcs.js'
 import { makeRng } from '../engine/rng.js'
 import { createInitialState } from '../engine/state.js'
 import { createJournal } from '../engine/journal.js'
@@ -44,19 +45,19 @@ function renderConfig(router) {
   const APPkey输入 = el('input', {
     type: 'password',
     placeholder: vm.key脱敏 || 'sk-...',
-    oninput: (e) => { APP会话.config = { ...APP会话.config, apiKey: e.target.value } },
+    oninput: (e) => { APP会话.config = { ...APP会话.config, apiKey: e.target.value }; APP刷新Config() },
   })
 
   const APP模型输入 = el('input', {
     type: 'text',
     value: vm.config.model,
-    oninput: (e) => { APP会话.config = { ...APP会话.config, model: e.target.value } },
+    oninput: (e) => { APP会话.config = { ...APP会话.config, model: e.target.value }; APP刷新Config() },
   })
 
   const APPbaseURL输入 = el('input', {
     type: 'text',
     value: vm.config.baseURL,
-    oninput: (e) => { APP会话.config = { ...APP会话.config, baseURL: e.target.value } },
+    oninput: (e) => { APP会话.config = { ...APP会话.config, baseURL: e.target.value }; APP刷新Config() },
   })
 
   const APP下一步Config = el('button', {
@@ -79,13 +80,23 @@ function renderConfig(router) {
     el('label', { text: '模型' }), APP模型输入,
   ])
 
-  if (vm.问题.length) {
-    APP面板Config.appendChild(el('div', { class: 'notice warn' },
-      vm.问题.map((x) => el('div', { text: '· ' + x }))))
+  // 只刷新派生 UI，不重建输入框——整屏重render 会让正在打字的输入框丢焦点。
+  // 不刷新则更糟：填了 key 按钮仍然禁用，玩家直接卡在第一屏进不去。
+  const APP警告位Config = el('div')
+  function APP刷新Config() {
+    const v = configViewModel(APP会话.config)
+    APP下一步Config.disabled = !v.可用
+    clear(APP警告位Config)
+    if (v.问题.length) {
+      APP警告位Config.appendChild(el('div', { class: 'notice warn' },
+        v.问题.map((x) => el('div', { text: '· ' + x }))))
+    }
   }
 
+  APP面板Config.appendChild(APP警告位Config)
   APP面板Config.appendChild(el('div', { class: 'row', style: 'margin-top:12px' }, [APP下一步Config]))
   root.appendChild(APP面板Config)
+  APP刷新Config()
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -103,7 +114,7 @@ function renderCreate(router) {
     placeholder: '主角名字',
     oninput: (e) => {
       APP会话.draft = { ...APP会话.draft, 名字: e.target.value }
-      renderCreate(router)
+      APP刷新Create()
     },
   })
 
@@ -123,7 +134,7 @@ function renderCreate(router) {
     max: '70',
     oninput: (e) => {
       APP会话.draft = { ...APP会话.draft, 年龄: Number(e.target.value) }
-      renderCreate(router)
+      APP刷新Create()
     },
   })
 
@@ -145,7 +156,7 @@ function renderCreate(router) {
     placeholder: '外貌描述（最多 60 字）',
     oninput: (e) => {
       APP会话.draft = { ...APP会话.draft, 外貌: e.target.value }
-      renderCreate(router)
+      APP刷新Create()
     },
   })
 
@@ -203,7 +214,7 @@ function renderCreate(router) {
     class: 'primary',
     disabled: !vm.可继续 || undefined,
     onclick: () => {
-      if (!vm.可继续) return
+      if (!createViewModel(APP会话.draft).可继续) return
       APP会话.季节 = rollSeason(makeRng(APP会话.种子))
       APP会话.队友 = drawCompanions(makeRng(APP会话.种子), APP会话.draft.性格)
       APP会话.已重抽 = 0
@@ -231,13 +242,25 @@ function renderCreate(router) {
     APP经验条, APP经验标注,
   ])
 
-  if (vm.问题.length) {
-    APP面板Create.appendChild(el('div', { class: 'notice warn' },
-      vm.问题.map((x) => el('div', { text: '· ' + x }))))
+  // 同 renderConfig：文本框只刷派生 UI，否则每敲一个字都整屏重建、焦点当场丢失。
+  // 经验条随职业/技能/年龄实时变化正是这一屏存在的意义，不能不刷。
+  const APP警告位Create = el('div')
+  function APP刷新Create() {
+    const v = createViewModel(APP会话.draft)
+    APP经验填充.style.width = `${v.户外经验}%`
+    setText(APP经验标注, `户外经验 ${v.户外经验} / 100`)
+    APP下一步Create.disabled = !v.可继续
+    clear(APP警告位Create)
+    if (v.问题.length) {
+      APP警告位Create.appendChild(el('div', { class: 'notice warn' },
+        v.问题.map((x) => el('div', { text: '· ' + x }))))
+    }
   }
 
+  APP面板Create.appendChild(APP警告位Create)
   APP面板Create.appendChild(el('div', { class: 'row', style: 'margin-top:12px' }, [APP随机按钮, APP下一步Create]))
   root.appendChild(APP面板Create)
+  APP刷新Create()
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -491,7 +514,7 @@ function APP出发(shopVm) {
   APP出发面板.appendChild(el('p', { text: '季节：' + APP会话.季节 }))
   APP出发面板.appendChild(el('p', { text: `剩余资金：¥${state.money}` }))
   APP出发面板.appendChild(el('p', { text: `背包物品：${state.pack.length} 件，${state.carry.当前} kg` }))
-  APP出发面板.appendChild(el('p', { text: `同行队友：${APP会话.队友.map((t) => t.npcId).join('、')}` }))
+  APP出发面板.appendChild(el('p', { text: `同行队友：${APP会话.队友.map((t) => getNpc(t.npcId).名称).join('、')}` }))
 
   // 存档结果反馈（writeSave 返回 false 表示存储已满）
   if (APP存档结果) {
