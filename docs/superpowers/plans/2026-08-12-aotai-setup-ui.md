@@ -1906,8 +1906,13 @@ function 脱敏(key) {
 export function configViewModel(raw) {
   const c = normalizeConfig(raw)
   const v = validateConfig(c)
+  // 视图模型里不放明文 key。渲染层只需要 model/baseURL 这些，
+  // 而 vm 一旦被 console.log 或序列化上屏，key 就跟着出去了。
+  // 要存盘时用会话里的完整 config，不要从 vm 里取。
+  const { apiKey, ...展示用配置 } = c
   return {
-    config: c,
+    config: 展示用配置,
+    有key: !!apiKey,
     预设: PRESETS.map((p) => ({ id: p.id, 名称: p.名称, baseURL: p.baseURL, 默认模型: p.默认模型, 选中: p.id === c.presetId })),
     key脱敏: 脱敏(c.apiKey),
     可用: v.ok,

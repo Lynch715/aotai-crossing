@@ -70,3 +70,15 @@ test('脱敏只露头尾，中间一律遮住', () => {
   assert.ok(!vm.key脱敏.includes('defghijklm'), `脱敏没遮住：${vm.key脱敏}`)
   assert.ok(vm.key脱敏.startsWith('sk-'))
 })
+
+test('视图模型里不带明文 key', () => {
+  const 密钥 = 'sk-abcdefghijklmnopqrstuvwxyz'
+  const vm = configViewModel({ presetId: 'deepseek', apiKey: 密钥 })
+  const 全文 = JSON.stringify(vm)
+  assert.ok(!全文.includes(密钥), '整个视图模型序列化后仍能搜到明文 key')
+  assert.equal(vm.config.apiKey, undefined)
+  assert.equal(vm.有key, true, '但要能告诉界面「填过了」')
+  assert.equal(configViewModel({ presetId: 'deepseek' }).有key, false)
+  // 展示用字段仍在
+  assert.ok(vm.config.baseURL && vm.config.model)
+})
