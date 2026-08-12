@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  stepStaminaCost, applyStepCost, isAcclimatized,
+  stepStaminaCost, applyStepCost, isAcclimatized, effectiveWarmth,
   rest, eatHot, eatCold, sleep, advanceSlot, dailyUpkeep,
 } from '../src/engine/consume.js'
 import { createInitialState } from '../src/engine/state.js'
@@ -192,4 +192,62 @@ test('每日结算扣 2 份主粮，不足则扣到 0', () => {
   dailyUpkeep(s)
   assert.equal(s.pack.some((p) => p.gearId === 'staple_food'), false)
   assert.equal(dailyUpkeep(s).断粮, true)
+})
+
+test('冬季没带睡袋过夜判为失温，连败计数递增', () => {
+  const s = 状态({ 海拔: 3100 })
+  s.meta.季节 = '冬季'
+  s.place.nodeId = 'shuiwozi'
+  sleep(s, { 恶劣天气: false })
+  assert.equal(s.flags.失温连败, 1)
+  sleep(s, { 恶劣天气: false })
+  assert.equal(s.flags.失温连败, 2)
+})
+
+test('睡袋够暖则连败归零', () => {
+  const s = 状态({ 海拔: 3100 })
+  s.meta.季节 = '秋季'
+  s.place.nodeId = 'shuiwozi'
+  s.flags.失温连败 = 2
+  s.pack.push({ gearId: 'tent', 档: '主流', 数量: 1, 单重: 2.4, 余量: 100 })
+  s.pack.push({ gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 })
+  sleep(s, { 恶劣天气: false })
+  // 秋季夜间 -6℃，睡袋温标 -10℃ 够用
+  assert.equal(s.flags.失温连败, 0)
+})
+
+test('内胆真的顶用：冬季 -25℃ 下把有效温标从 -10 拉到 -15', () => {
+  const 造 = (带内胆) => {
+    const s = 状态({ 海拔: 3100 })
+    s.meta.季节 = '冬季'
+    s.place.nodeId = 'shuiwozi'
+    s.pack.push({ gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 })
+    if (带内胆) s.pack.push({ gearId: 'bag_liner', 档: '通用', 数量: 1, 单重: 0.3, 余量: 100 })
+    return s
+  }
+  // 冬季 -25℃ 下两者都不够，但有效温标必须随内胆变化
+  assert.equal(effectiveWarmth(造(false)), -10)
+  assert.equal(effectiveWarmth(造(true)), -15)
+})
+
+test('春季 -8℃ 下内胆足以扭转失温判定', () => {
+  const 造 = (带内胆) => {
+    const s = 状态({ 海拔: 3100 })
+    s.meta.季节 = '春季'
+    s.place.nodeId = 'shuiwozi'
+    // 只带睡袋时有效温标 -10，春季 -8 已经够用；这里用没带睡袋对照
+    if (带内胆) {
+      s.pack.push({ gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 })
+    }
+    return s
+  }
+  sleep(造(false), {})
+  const 有 = 造(true)
+  sleep(有, {})
+  assert.equal(有.flags.失温连败, 0, '带了睡袋的春季不该失温')
+})
+
+test('没带睡袋时有效温标记为毫无保暖', () => {
+  const s = 状态({ 海拔: 3100 })
+  assert.equal(effectiveWarmth(s), 99)
 })
