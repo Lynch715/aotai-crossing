@@ -22,6 +22,9 @@
 2. **导入必须单行**：`import { foo, bar } from './x.js'`。禁止跨行导入、禁止 `import * as ns`。
 3. **模块顶层不得有同名标识符**：拼接后所有模块共享一个作用域，重名会直接覆盖。命名带模块前缀（如 `judgeOption`、`applyConsume`）。
 4. 行首的 `import` / `export` 关键字前不得有缩进。
+5. **模块私有常量也必须带模块前缀**。这是第 3 条最容易被忽略的一半——`const BY_ID = new Map(...)` 这种查表常量每个数据模块都想要一个，四个模块写四遍就是四重覆盖。一律写成 `ROUTE_BY_ID` / `NPC_BY_ID` / `GEAR_BY_ID` / `SEASON_BY_ID`。同理适用于 `SECTIONS`、`SLOTS`、`DEFAULTS` 这类通用名。
+
+> 违反第 3、5 条不会静默：`test/build.test.js` 的「bundle 可求值」用例会在拼接产物里撞出 `Identifier 'X' has already been declared` 并失败。但**命名冲突要在写代码时就避免，别指望测试兜底**——等到第 12 个模块才发现，改动面就大了。
 
 ---
 
@@ -79,11 +82,13 @@ test/
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test",
     "build": "node build.mjs"
   }
 }
 ```
+
+> **注意**：`node --test test/`（带目录参数）在 Node v25 下会失败——目录路径被当成 CJS 模块加载。用无参数的 `node --test`，它按默认模式自动发现 `test/*.test.js`；这样 `npm test` 跑全部、`npm test -- test/x.test.js` 正好跑单个，与本计划后续各任务的命令一致。
 
 - [ ] **Step 2: 写失败的测试**
 
@@ -266,13 +271,21 @@ export const MODULE_ORDER = [
   'src/engine/rng.js',
 ]
 
-// 行首（无缩进）的 import 整行删除；行首的 export 关键字剥掉。
-// 约束见计划开头的「代码风格约束」——字符串里的同名字样因为不在行首，不受影响。
+// 只删真正的 import 语句（必须有 from 子句或裸副作用导入），
+// 只剥真正的 export 声明（后面必须跟 function/const/let/var/class）。
+//
+// 为什么不用宽松的 /^import\s/ 和 /^export\s+/：模板字符串的续行也在列 0，
+// 一旦某行以 "export 你的数据" 或 "import 一段说明" 开头就会被静默改写或整行删掉。
+// Task 15 的 system prompt 是一大段多行模板，正好是重灾区，而且测试跑的是 src/
+// 的 ESM 原文、不是拼接产物，这种损坏永远测不出来。
+const IMPORT_LINE = /^import\s+[^'"]*from\s+['"][^'"]+['"];?\s*$|^import\s+['"][^'"]+['"];?\s*$/
+const EXPORT_KEYWORD = /^export\s+(?=(async\s+)?(function|const|let|var|class)\s)/
+
 export function stripModuleSyntax(source) {
   return source
     .split('\n')
-    .filter((line) => !/^import\s/.test(line))
-    .map((line) => line.replace(/^export\s+/, ''))
+    .filter((line) => !IMPORT_LINE.test(line))
+    .map((line) => line.replace(EXPORT_KEYWORD, ''))
     .join('\n')
 }
 
@@ -301,7 +314,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `npm test`
-Expected: PASS，全部 10 个测试绿
+Expected: PASS，全部测试绿（数量以实际为准，别照抄写死的数字）
 
 - [ ] **Step 6: 跑一次真实构建**
 
@@ -319,11 +332,32 @@ git commit -m "feat: 构建管线，多文件拼接为单文件"
 
 ---
 
-**登记提醒：此后每新增一个 `src/` 模块，都必须把它的路径按拓扑顺序追加进 `build.mjs` 的 `MODULE_ORDER`，否则它不会进入单文件产物。后续每个 Task 的提交步骤都包含这一动作。**
+**登记提醒：此后每新增一个 `src/` 模块，都必须把它的路径按拓扑顺序追加进 `build.mjs` 的 `MODULE_ORDER`。后续每个 Task 的提交步骤都包含这一动作。**
+
+**实际实现比上面的片段多了四道加固（评审后追加，已落地在 `build.mjs`）：**
+
+1. `IMPORT_LINE` 容忍行尾注释——`import { a } from './x.js' // 说明` 这种行若漏进产物，会让整个游戏在加载时 `SyntaxError`（产物 `<script>` 没有 `type="module"`）。
+2. **产物求值冒烟测试**：`new Function(buildScript())()` 真跑一遍 bundle，并注入探针确认拼接后的函数可调用。这是此类静默损坏的结构性防线——比把正则写全更可靠，因为其余测试跑的都是 `src/` 的 ESM 原文，碰不到拼接产物。
+3. `assertModuleOrderComplete()` 递归扫描 `src/`，发现未登记的 `.js` 就报错并点名路径。忘记登记不再是静默缺模块。
+4. `buildHtml()` 校验 `__STYLES__` / `__SCRIPT__` 占位符存在，缺失即报错，不再静默产出无脚本的 HTML。
+
+已端到端验证：忘记登记新模块 → 4 个测试失败；登记了但用了被禁的多行 import → 求值测试与残留检查双双失败。
 
 ---
 
 ## 阶段二 · 静态数据
+
+> **数据保真防线（T4 期间加入，T5/T6 自动生效）**
+>
+> `test/source-fidelity.test.js` 会把数据模块里所有含中文的字符串字面量，逐条拿去
+> `test/fixtures/source-text.txt`（源 .docx 抽出的纯文本）里做子串匹配，找不到就失败并点名。
+>
+> 起因：T4 的实现代理把 猛蛇过江 事迹里的弯引号 `“驴友引路”` 悄悄转成了直引号，
+> 却在报告里声称已保留。结构性测试（数量、字段齐备）全绿，只有逐字比对能发现。
+>
+> **新增数据模块后，把路径加进该测试的 `受检模块` 数组。** 项目自造、源文档本就没有的
+> 中文（如捏人性格标签）加进 `允许不在源文档中` 并写明理由——清单里若出现源文档其实有的
+> 条目，另有一条测试会报错。
 
 ### Task 3: 路线数据
 
@@ -480,17 +514,17 @@ export const MAIN_PATH = [
 ]
 
 // 主路径之外的额外连接：备用起点、南北下撤线
-const EXTRA_LINKS = [
+const ROUTE_EXTRA_LINKS = [
   ['miaopu', 'huoshaopo'],
   ['shuiwozi', 'hetaoping'],
   ['yingdi2800', 'hetaoping'],
   ['yingdi2800', 'songpingsi'],
 ]
 
-const BY_ID = new Map(ROUTE.map((n) => [n.id, n]))
+const ROUTE_BY_ID = new Map(ROUTE.map((n) => [n.id, n]))
 
 export function getNode(id) {
-  return BY_ID.get(id)
+  return ROUTE_BY_ID.get(id)
 }
 
 export function isAdjacent(fromId, toId) {
@@ -498,7 +532,7 @@ export function isAdjacent(fromId, toId) {
   const i = MAIN_PATH.indexOf(fromId)
   const j = MAIN_PATH.indexOf(toId)
   if (i !== -1 && j !== -1 && Math.abs(i - j) === 1) return true
-  return EXTRA_LINKS.some(
+  return ROUTE_EXTRA_LINKS.some(
     ([a, b]) => (a === fromId && b === toId) || (a === toId && b === fromId)
   )
 }
@@ -507,7 +541,7 @@ export function isAdjacent(fromId, toId) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/route.test.js`
-Expected: PASS，10 个测试全绿
+Expected: PASS，13 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序**
 
@@ -670,10 +704,10 @@ export const PERSONALITY_TAGS = [
   { id: 'weifengjing', 文案: '为风景可以吃苦', 轴: [1, 0, 0, 1] },
 ]
 
-const BY_ID = new Map(NPCS.map((n) => [n.id, n]))
+const NPC_BY_ID = new Map(NPCS.map((n) => [n.id, n]))
 
 export function getNpc(id) {
-  return BY_ID.get(id)
+  return NPC_BY_ID.get(id)
 }
 ```
 
@@ -813,12 +847,12 @@ Expected: FAIL — 模块不存在
 // 装备物资。GEAR 为文档原表 21 项，价格取区间中值，重量按档分配（越贵越轻）。
 // EXTRA_GEAR 为设计新增的可选物资，用于让 30kg 负重上限真正成为约束（见 spec 第 7 节）。
 export const GEAR = [
-  { id: 'backpack', 名称: '重装徒步背包 60-70L', 类别: '背负系统', 档次: [
+  { id: 'backpack', 名称: '重装徒步背包（60-70L）', 类别: '背负系统', 档次: [
     { 档: '经济', 价格: 750, 重量: 2.5 }, { 档: '主流', 价格: 2000, 重量: 2.1 }, { 档: '轻量', 价格: 3200, 重量: 1.8 }] },
 
   { id: 'tent', 名称: '三季帐篷（双人）', 类别: '睡眠系统', 档次: [
     { 档: '经济', 价格: 550, 重量: 3.0 }, { 档: '主流', 价格: 1500, 重量: 2.4 }, { 档: '轻量', 价格: 3000, 重量: 1.8 }] },
-  { id: 'sleeping_bag', 名称: '羽绒睡袋（-5℃至-10℃）', 类别: '睡眠系统', 温标: -10, 档次: [
+  { id: 'sleeping_bag', 名称: '羽绒睡袋（舒适温标-5℃至-10℃）', 类别: '睡眠系统', 温标: -10, 档次: [
     { 档: '经济', 价格: 600, 重量: 1.5 }, { 档: '主流', 价格: 1500, 重量: 1.2 }, { 档: '轻量', 价格: 2500, 重量: 1.0 }] },
   { id: 'sleeping_pad', 名称: '蛋巢/充气防潮垫（R值≥3）', 类别: '睡眠系统', 档次: [
     { 档: '经济', 价格: 150, 重量: 0.6 }, { 档: '主流', 价格: 450, 重量: 0.5 }, { 档: '轻量', 价格: 800, 重量: 0.4 }] },
@@ -850,7 +884,7 @@ export const GEAR = [
     { 档: '基础', 价格: 35, 重量: 0.05 }] },
   { id: 'ors', 名称: '口服补液盐', 类别: '医疗用品', 档次: [
     { 档: '基础', 价格: 20, 重量: 0.05 }] },
-  { id: 'sat_phone', 名称: '卫星电话（租用）', 类别: '医疗用品', 求救设备: true, 档次: [
+  { id: 'sat_phone', 名称: '卫星电话（租用）', 类别: '关键装备', 求救设备: true, 档次: [
     { 档: '租用', 价格: 750, 重量: 0.4 }] },
 
   { id: 'staple_food', 名称: '高能量棒/压缩干粮', 类别: '食物', 每日消耗: 2, 档次: [
@@ -918,31 +952,34 @@ export const EXTRA_GEAR = [
     作用: '装备损坏事件的唯一解', 档次: [{ 档: '通用', 价格: 80, 重量: 0.2 }] },
   { id: 'mosquito_repellent', 名称: '防蚊液', 类别: '扩充·杂项', 季节: ['夏季'],
     作用: '夏季防蚊', 档次: [{ 档: '通用', 价格: 50, 重量: 0.15 }] },
-  { id: 'sun_gear', 名称: '遮阳帽 + 墨镜', 类别: '扩充·杂项', 季节: ['夏季'],
+  { id: 'sun_gear', 名称: '遮阳帽 + 墨镜', 类别: '扩充·杂项', 季节: ['春季', '夏季', '冬季'],
     作用: '夏季防晒，雪季防雪盲', 档次: [{ 档: '通用', 价格: 200, 重量: 0.2 }] },
 ]
 
 export const ALL_GEAR = [...GEAR, ...EXTRA_GEAR]
 
-const BY_ID = new Map(ALL_GEAR.map((g) => [g.id, g]))
+const GEAR_BY_ID = new Map(ALL_GEAR.map((g) => [g.id, g]))
 
 export function getGear(id) {
-  return BY_ID.get(id)
+  return GEAR_BY_ID.get(id)
 }
 
 export function tierOf(gearId, 档名) {
-  const g = BY_ID.get(gearId)
+  const g = GEAR_BY_ID.get(gearId)
   if (!g) return undefined
   return g.档次.find((t) => t.档 === 档名)
 }
 
-// 原表每项各取「中间档」（三档取第二档，两档取第二档，单档取唯一档）的合计。
-// 用于校验设计目标：中档全配 14.1kg / ¥14,375。
+// 原表每项各取「中档」的合计，用于校验设计目标：中档全配 14.1kg / ¥14,375。
+//
+// 取档规则：优先取名为「主流」的档，没有则取第二便宜的档（单档物品取唯一档）。
+// 不能简单按下标取 档次[1]——freeze_dried 没有经济档，它的档次是 [主流, 高端]，
+// 按下标会取到高端档，合计变成 13.7kg / ¥14,675，与设计目标对不上。
 export function midTierLoadout() {
   let 总重 = 0
   let 总价 = 0
   for (const g of GEAR) {
-    const t = g.档次.length >= 2 ? g.档次[1] : g.档次[0]
+    const t = g.档次.find((x) => x.档 === '主流') ?? g.档次[Math.min(1, g.档次.length - 1)]
     总重 += t.重量
     总价 += t.价格
   }
@@ -982,6 +1019,14 @@ git commit -m "feat: 装备数据 21 原表 + 25 扩充，订正 spec 数字"
 ---
 
 ### Task 6: 四季数据
+
+> **待调项（评审发现，不阻塞本任务）：冬季睡袋警告目前无法消除。**
+>
+> 装备表里最暖的睡袋是 `sleeping_bag` 温标 −10℃，加 `bag_liner` 也只到 −15℃，而冬季夜间设定为 −25℃。换言之**玩家无论怎么买，冬季都会一直看到这条警告**。一条永远消不掉的警告会训练玩家忽略所有警告，是实打实的体验缺陷。
+>
+> 根子在源文档自身：它的装备表只有一款 −10℃ 睡袋，四季表却给冬季推荐「极寒睡袋（−20℃以下）」，两张表本就对不上。
+>
+> 建议解法是给 `EXTRA_GEAR` 加一项「极寒睡袋 −20℃」。之所以现在不加：`EXTRA_GEAR` 的 25 项、16.05kg、¥7,630 三个数字被测试钉死，还流进了 spec 第 7 节的表格与结论，中途改动波及面大。**留到首轮试玩后统一调档时处理**（spec 第 7 节末尾已写明「具体数值以实测手感为准」）。
 
 **Files:**
 - Create: `src/data/seasons.js`
@@ -1048,6 +1093,15 @@ test('睡袋温标不足会报警告', () => {
   assert.ok(!gearWarnings('夏季', ['sleeping_bag']).some((x) => x.includes('温标')))
 })
 
+test('睡袋温标从 gear.js 读取，不是硬编码', () => {
+  // 冬季夜间 -25℃：睡袋 -10℃ 不够，加内胆后 -15℃ 仍不够，
+  // 但警告文案里的数字必须随 gear.js 的数据变化，否则说明被写死了
+  const 无内胆 = gearWarnings('冬季', ['sleeping_bag']).find((x) => x.includes('温标'))
+  const 有内胆 = gearWarnings('冬季', ['sleeping_bag', 'bag_liner']).find((x) => x.includes('温标'))
+  assert.ok(无内胆.includes('-10℃'), `无内胆文案: ${无内胆}`)
+  assert.ok(有内胆.includes('-15℃'), `有内胆文案: ${有内胆}`)
+})
+
 test('getSeason 取不到返回 undefined', () => {
   assert.equal(getSeason('雨季'), undefined)
 })
@@ -1063,6 +1117,8 @@ Expected: FAIL — 模块不存在
 `src/data/seasons.js`。风险与推荐准备逐条照搬文档「四季穿越鳌太线风险对比」表：
 
 ```js
+import { getGear } from './gear.js'
+
 // 四季风险。主要风险/次要风险/推荐准备逐条照搬文档表格。
 // 夜间温度为设计新增，用于判断睡袋温标是否够用。
 export const SEASONS = [
@@ -1084,10 +1140,10 @@ export const SEASONS = [
     推荐准备: ['极寒睡袋（-20℃以下）', '羽绒服+硬壳', '雪镜', '防冻液', '卫星电话', '团队协作绝不独行'] },
 ]
 
-const BY_ID = new Map(SEASONS.map((s) => [s.id, s]))
+const SEASON_BY_ID = new Map(SEASONS.map((s) => [s.id, s]))
 
 export function getSeason(id) {
-  return BY_ID.get(id)
+  return SEASON_BY_ID.get(id)
 }
 
 export function rollSeason(rng) {
@@ -1096,7 +1152,7 @@ export function rollSeason(rng) {
 
 // 采购界面的季节警告。ownedIds 为已选物资 id 数组。
 export function gearWarnings(seasonId, ownedIds) {
-  const season = BY_ID.get(seasonId)
+  const season = SEASON_BY_ID.get(seasonId)
   if (!season) return []
   const owned = new Set(ownedIds)
   const 警告 = []
@@ -1114,9 +1170,18 @@ export function gearWarnings(seasonId, ownedIds) {
     警告.push('夏季蚊虫叮咬频繁，未带防蚊液。')
   }
 
-  if (owned.has('sleeping_bag')) {
-    // 睡袋标称温标 -10℃，内胆再加 5℃
-    const 实际温标 = -10 + (owned.has('bag_liner') ? -5 : 0)
+  // 温标一律从 gear.js 读，不在这里硬编码——否则改了装备表，警告还按老值算，
+  // 而且没有任何测试会报错。温标越低越保暖；内胆的「温标加成」是保暖增量，
+  // 所以从睡袋温标里再减去它。
+  const 睡袋 = owned.has('sleeping_bag') ? getGear('sleeping_bag') : undefined
+  if (!睡袋) {
+    // 压根没带睡袋。只买内胆不买睡袋也走这条——内胆不能单独用。
+    if (season.夜间温度 < 0) {
+      警告.push(`${season.名称}夜间约 ${season.夜间温度}℃，没带睡袋，夜里根本扛不住。`)
+    }
+  } else {
+    const 加成 = owned.has('bag_liner') ? (getGear('bag_liner')?.温标加成 ?? 0) : 0
+    const 实际温标 = 睡袋.温标 - 加成
     if (season.夜间温度 < 实际温标) {
       警告.push(`${season.名称}夜间约 ${season.夜间温度}℃，睡袋温标 ${实际温标}℃ 不够用，夜里会冷醒甚至失温。`)
     }
@@ -1129,7 +1194,7 @@ export function gearWarnings(seasonId, ownedIds) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/seasons.test.js`
-Expected: PASS，9 个测试全绿
+Expected: PASS，13 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序**
 
@@ -1318,7 +1383,9 @@ export function createInitialState(opts) {
     flags: { 已求救: false, 已下撤: false, 高海拔过夜数: 0, 失温连败: 0, 触发过的事件id: [] },
   }
 
-  state.place.海拔 = getNode(state.place.nodeId).海拔
+  const 起点节点 = getNode(state.place.nodeId)
+  if (!起点节点) throw new Error(`createInitialState: 起点不是合法节点 id：${state.place.nodeId}`)
+  state.place.海拔 = 起点节点.海拔
 
   for (const item of opts.背包 || []) {
     addItem(state, item.gearId, item.档, item.数量)
@@ -1336,9 +1403,14 @@ export function recalcCarry(state) {
 export function addItem(state, gearId, 档, 数量 = 1) {
   const tier = tierOf(gearId, 档)
   if (!tier) return false
+  if (!Number.isFinite(数量) || 数量 <= 0) return false
   const 已有 = state.pack.find((p) => p.gearId === gearId)
   if (已有) {
+    // 换档要同步替换整摞的档次与单重。只加数量不改单重的话，负重会按旧档
+    // 算出错值且无人察觉——而「数值不飘」正是这整套架构存在的理由。
     已有.数量 += 数量
+    已有.档 = 档
+    已有.单重 = tier.重量
   } else {
     state.pack.push({ gearId, 档, 数量, 单重: tier.重量, 余量: 100 })
   }
@@ -1347,6 +1419,7 @@ export function addItem(state, gearId, 档, 数量 = 1) {
 }
 
 export function removeItem(state, gearId, 数量 = 1) {
+  if (!Number.isFinite(数量) || 数量 <= 0) return false
   const i = state.pack.findIndex((p) => p.gearId === gearId)
   if (i === -1) return false
   state.pack[i].数量 -= 数量
@@ -1357,6 +1430,9 @@ export function removeItem(state, gearId, 数量 = 1) {
 
 // 按百分比消耗（气罐、净水药片这类）。归零则摘出背包。
 export function consumeItem(state, gearId, 百分比) {
+  // 负百分比等于凭空把消耗品加满，必须拦。写入层自己守住，
+  // 不指望每个调用点都记得校验。
+  if (!Number.isFinite(百分比) || 百分比 <= 0) return false
   const item = state.pack.find((p) => p.gearId === gearId)
   if (!item) return false
   item.余量 -= 百分比
@@ -1381,7 +1457,7 @@ export function restore(snap) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/state.test.js`
-Expected: PASS，11 个测试全绿
+Expected: PASS，13 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -1540,11 +1616,11 @@ export function successChance(gap) {
 
 // 算出「离达标还差多少」。多条门槛取最大差距——最短板决定成败。
 export function gapFor(require, state) {
-  const reasons = []
+  const 未达 = []
   let gap = 0
   const bump = (d, why) => {
     if (d > 0) {
-      reasons.push(why)
+      未达.push({ d, why })
       if (d > gap) gap = d
     }
   }
@@ -1577,10 +1653,18 @@ export function gapFor(require, state) {
   // 体力见底时百事艰难：所有判定统一加码，不区分门槛类型。
   if (gap < UNREACHABLE && state.pc.体力 < 体力惩罚阈值) {
     gap += 体力惩罚差距
-    reasons.push(`体力 ${state.pc.体力} 低于 ${体力惩罚阈值}，判定额外加 ${体力惩罚差距} 点难度`)
+    未达.push({ d: 体力惩罚差距, why: `体力 ${state.pc.体力} 低于 ${体力惩罚阈值}，判定额外加 ${体力惩罚差距} 点难度` })
   }
 
-  return { gap, reasons }
+  // 数值门槛可能报得离谱（LLM 写了个「需经验 5000」），算出的差距会远超哨兵值。
+  // 一律收敛到 UNREACHABLE，否则下游用 gap === UNREACHABLE 判结构性不可达时会漏掉。
+  if (gap > UNREACHABLE) gap = UNREACHABLE
+
+  // 按差距从大到小排：reasons[0] 恒为真正卡住玩家的那一条。
+  // 「玩家能看懂自己为什么失败」是这套判定存在的前提，UI 要显示的就是它。
+  未达.sort((a, b) => b.d - a.d)
+
+  return { gap, reasons: 未达.map((r) => r.why) }
 }
 
 // 判定在调用 LLM 之前完成。返回值直接决定要告诉 LLM 的「既成事实」。
@@ -1606,7 +1690,7 @@ export function judgeOption(option, state, rng) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/threshold.test.js`
-Expected: PASS，13 个测试全绿。最后一条统计测试若偶发失败，检查 `judgeOption` 是否对每次调用都新建了 rng——测试里是故意每轮换种子的。
+Expected: PASS，15 个测试全绿。最后一条统计测试若偶发失败，检查 `judgeOption` 是否对每次调用都新建了 rng——测试里是故意每轮换种子的。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -1625,6 +1709,16 @@ git commit -m "feat: 门槛差距计算与边缘掷骰判定"
 ---
 
 ### Task 9: 消耗、回复与高山适应
+
+> **来自 T5 评审的预警**：`gear.js` 里 `staple_food` 标了 `每日消耗: 2`，而 `extra_staple`（额外主粮 +3 天）标的是 `每日消耗: 0`。这个 `0` 是有意的——额外主粮是**缓冲池**，不自己产生每日扣减，而是在主粮见底时顶上。
+>
+> **来自 T7 评审的第二条预警：`余量` 是整摞共享的百分比，不是每件独立的。**
+>
+> `state.js` 的 `pack` 条目里，`余量` 只有一个值，而 `数量` 可以大于 1。实测：带 2 个 `stove`，`consumeItem(s,'stove',50)` 两次就把**两个一起**清空——也就是说带 2 个和带 1 个能用的次数完全一样，买备用等于白买。
+>
+> 燃料的正确模型是分两层：`stove` 自带罐的 `余量` 先烧完，再去动 `extra_canister`（那是独立的 gearId，不是 `stove` 的数量叠加）。**Task 9 必须显式实现「当前罐烧完后启用下一罐」，并为「带 2 罐比带 1 罐能多做几顿热食」写一个测试。** 若沿用当前的共享百分比模型，这条测试会直接失败。
+
+> 实现时必须区分「字段为 0」与「字段不存在」：按 `if (g.每日消耗)` 判断时 `0` 会和 `undefined` 一样被跳过，行为恰好正确；但按 `if ('每日消耗' in g)` 判断，`extra_staple` 会被当成每日消耗品扣 0，虽不出错却会混进消耗清单误导玩家。**明确用数值判断，并为「主粮耗尽后自动启用额外主粮」写一个测试。**
 
 **Files:**
 - Create: `src/engine/consume.js`
@@ -1786,6 +1880,50 @@ test('时段推进：早→中→晚→次日早', () => {
   assert.deepEqual(advanceSlot(s).clock, { day: 2, slot: '早' })
 })
 
+test('气罐烧完换备用罐，炉头不会跟着丢掉', () => {
+  const s = 状态({ pc: { 体力: 0 } })
+  s.pack.push({ gearId: 'stove', 档: '主流', 数量: 1, 单重: 0.4, 余量: 100 })
+  s.pack.push({ gearId: 'freeze_dried', 档: '主流', 数量: 60, 单重: 1.2, 余量: 100 })
+
+  let 顿数 = 0
+  while (eatHot(s)) 顿数++
+  assert.equal(顿数, 12, `一罐 8%/顿应做 12 顿，实为 ${顿数}`)
+  assert.ok(s.pack.some((p) => p.gearId === 'stove'), '没气了也不该把炉头丢掉')
+})
+
+test('带备用气罐能多做热食——买备用不是白买', () => {
+  const s = 状态({ pc: { 体力: 0 } })
+  s.pack.push({ gearId: 'stove', 档: '主流', 数量: 1, 单重: 0.4, 余量: 100 })
+  s.pack.push({ gearId: 'extra_canister', 档: '通用', 数量: 2, 单重: 0.5, 余量: 100 })
+  s.pack.push({ gearId: 'freeze_dried', 档: '主流', 数量: 60, 单重: 1.2, 余量: 100 })
+
+  let 顿数 = 0
+  while (eatHot(s)) 顿数++
+  assert.equal(顿数, 36, `自带罐 + 2 备用罐应做 36 顿，实为 ${顿数}`)
+  assert.ok(!s.pack.some((p) => p.gearId === 'extra_canister'), '备用罐应已用尽')
+})
+
+test('主粮耗尽后自动启用额外主粮', () => {
+  const s = 状态()
+  s.pack.find((p) => p.gearId === 'staple_food').数量 = 3
+  s.pack.push({ gearId: 'extra_staple', 档: '通用', 数量: 4, 单重: 1.2, 余量: 100 })
+
+  assert.deepEqual(dailyUpkeep(s), { 断粮: false, 欠缺: 0 })
+  assert.equal(s.pack.find((p) => p.gearId === 'staple_food').数量, 1)
+
+  // 主粮只剩 1 份，缺口由额外主粮补上
+  dailyUpkeep(s)
+  assert.ok(!s.pack.some((p) => p.gearId === 'staple_food'), '主粮应已耗尽')
+  assert.equal(s.pack.find((p) => p.gearId === 'extra_staple').数量, 3)
+
+  dailyUpkeep(s)
+  assert.equal(s.pack.find((p) => p.gearId === 'extra_staple').数量, 1)
+
+  const 最后 = dailyUpkeep(s)
+  assert.equal(最后.断粮, true)
+  assert.equal(最后.欠缺, 1, '最后一天只吃到 1 份')
+})
+
 test('每日结算扣 2 份主粮，不足则扣到 0', () => {
   const s = 状态()
   dailyUpkeep(s)
@@ -1807,13 +1945,15 @@ Expected: FAIL — 模块不存在
 
 ```js
 import { getNode } from '../data/route.js'
-import { removeItem, consumeItem, hasItem } from './state.js'
+import { removeItem, hasItem } from './state.js'
 
 const 基础时段消耗 = 6
 const 负重基准线 = 15
 const 高海拔线 = 3400
 const 适应海拔线 = 3000
 const 需要适应晚数 = 1
+const 每次热食耗气 = 8
+const 每日主粮 = 2
 
 const SLOTS = ['早', '中', '晚']
 
@@ -1848,7 +1988,18 @@ export function eatHot(state) {
   if (!hasItem(state, 'stove')) return false
   const 有餐 = hasItem(state, 'freeze_dried') || hasItem(state, 'extra_freeze_dried')
   if (!有餐) return false
-  consumeItem(state, 'stove', 8)
+
+  // 气罐见底要换备用罐，而不是把整套炉具丢掉——直接 consumeItem 归零会连炉头
+  // 一起摘出背包。这里也是「带 2 罐比带 1 罐能多做热食」真正成立的地方：
+  // extra_canister 是独立 gearId，不是 stove 的数量叠加（见本任务开头的 T7 预警）。
+  const 炉 = state.pack.find((p) => p.gearId === 'stove')
+  if (炉.余量 < 每次热食耗气) {
+    if (!hasItem(state, 'extra_canister')) return false
+    removeItem(state, 'extra_canister', 1)
+    炉.余量 = 100
+  }
+  炉.余量 -= 每次热食耗气
+
   removeItem(state, hasItem(state, 'freeze_dried') ? 'freeze_dried' : 'extra_freeze_dried', 1)
   调整体力(state, 6)
   return true
@@ -1882,19 +2033,28 @@ export function advanceSlot(state) {
   return state
 }
 
-// 每天扣一次主粮。返回是否断粮，供结局判定参考。
+// 每天扣 2 份主粮；主粮见底后自动动用 extra_staple 这个缓冲池
+//（它的 每日消耗 标的是 0，正是「不自己扣、只在顶上时被动消耗」的意思）。
+// 返回是否断粮，供结局判定参考；欠缺 > 0 表示今天没吃够。
 export function dailyUpkeep(state) {
-  const 主粮 = state.pack.find((p) => p.gearId === 'staple_food')
-  if (!主粮) return { 断粮: true }
-  removeItem(state, 'staple_food', Math.min(2, 主粮.数量))
-  return { 断粮: !hasItem(state, 'staple_food') }
+  let 待扣 = 每日主粮
+  for (const id of ['staple_food', 'extra_staple']) {
+    if (待扣 <= 0) break
+    const 项 = state.pack.find((p) => p.gearId === id)
+    if (!项) continue
+    const 扣 = Math.min(待扣, 项.数量)
+    removeItem(state, id, 扣)
+    待扣 -= 扣
+  }
+  const 还有粮 = hasItem(state, 'staple_food') || hasItem(state, 'extra_staple')
+  return { 断粮: !还有粮, 欠缺: 待扣 }
 }
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/consume.test.js`
-Expected: PASS，18 个测试全绿。重点确认「spec 里的样例」那条——`floor(6 × 1.04^11.8) = 9` 是设计文档流转示例里的数字，对不上说明公式抄错了。
+Expected: PASS，21 个测试全绿。重点确认「spec 里的样例」那条——`floor(6 × 1.04^11.8) = 9` 是设计文档流转示例里的数字，对不上说明公式抄错了。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -2015,13 +2175,15 @@ test('初始好感落在 10-45', () => {
 })
 
 test('性格越合拍初始好感越高', () => {
-  // 「话不多，认死理」[-1,-1,0,-1] 对陈岩「沉稳寡言」[-1,-1,0,-1] 全同号
+  // 「话不多，认死理」[-1,-1,0,-1] 对陈岩「沉稳寡言」[-1,-1,0,-1]：
+  // 三条非零轴全同号，轴2 因标签为 0 跳过
   const 合拍 = initialAffinity('renside', 'chenyan')
-  // 同一标签对韩梅「强势控制欲」[1,1,1,-1] 三轴异号
+  // 同一标签对韩梅「强势控制欲」[1,1,1,-1]：轴0/轴1 异号，
+  // 轴2 因标签为 0 跳过（不是三轴异号），轴3 同号
   const 不合 = initialAffinity('renside', 'hanmei')
   assert.ok(合拍 > 不合, `合拍 ${合拍} 应高于不合 ${不合}`)
-  assert.equal(合拍, 37) // 25 + 4*3（三条非零轴同号）
-  assert.equal(不合, 17) // 25 - 4*3 + 4*1
+  assert.equal(合拍, 37) // 25 + 4×3
+  assert.equal(不合, 21) // 25 − 4×2 + 4×1
 })
 
 test('未知标签或未知 npc 返回基准值', () => {
@@ -2060,14 +2222,19 @@ export function clampAffinity(v) {
 }
 
 export function affinityLabel(v) {
-  const hit = 分级.find(([lo, hi]) => v >= lo && v <= hi)
+  // 先夹取再查表。否则 affinityLabel(150) 会落空并回落成「冷淡」——
+  // 一个静默的谎言，而它恰恰出现在 UI 上给玩家看。
+  const 夹取后 = clampAffinity(v)
+  const hit = 分级.find(([lo, hi]) => 夹取后 >= lo && 夹取后 <= hi)
   return hit ? hit[2] : '冷淡'
 }
 
 // LLM 只能提议好感变化，落地前先夹到允许幅度——防止一句话涨 40 点。
 export function applyAffinityDelta(state, npcId, delta, { 重大 = false } = {}) {
   const 同伴 = state.party.find((p) => p.npcId === npcId && p.在队)
-  if (!同伴) return { 应用: false, 实际: 0, 被夹取: false }
+  // 两个分支返回同样的键。少给 前值/后值 的话，调用方一解构就静默拿到
+  // undefined，拿去比阈值或做算术会悄悄算错。
+  if (!同伴) return { 应用: false, 实际: 0, 被夹取: false, 前值: null, 后值: null }
 
   const 上限 = 重大 ? MAX_MAJOR_DELTA : MAX_DELTA
   const 实际 = Math.max(-上限, Math.min(上限, delta))
@@ -2097,7 +2264,7 @@ export function initialAffinity(tagId, npcId) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/affinity.test.js`
-Expected: PASS，11 个测试全绿。「性格越合拍初始好感越高」里的 37 与 17 是按 Task 4 的轴值手算的，对不上说明轴值抄错——回 `npcs.js` 核对，别改断言。
+Expected: PASS，13 个测试全绿。「性格越合拍初始好感越高」里的 37 与 17 是按 Task 4 的轴值手算的，对不上说明轴值抄错——回 `npcs.js` 核对，别改断言。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -2197,11 +2364,12 @@ test('失败遇险优先于被救援', () => {
 })
 
 test('applyEnding 写入 phase 与结局，并对成功穿越扣罚款', () => {
-  const s = 状态({ place: { nodeId: 'xiabansi', 海拔: 2800 } })
+  // 钱要多于罚款才看得出扣款；基础夹具的 4320 不够扣，会被下限夹成 0
+  const s = 状态({ place: { nodeId: 'xiabansi', 海拔: 2800 }, money: 8000 })
   applyEnding(s, checkEnding(s))
   assert.equal(s.phase, '结局')
   assert.equal(s.ending.type, '成功穿越')
-  assert.equal(s.money, 4320 - FINE_AMOUNT)
+  assert.equal(s.money, 8000 - FINE_AMOUNT)
 })
 
 test('罚款不会把钱扣成负数', () => {
@@ -2227,6 +2395,8 @@ Expected: FAIL — 模块不存在
 `src/engine/ending.js`：
 
 ```js
+import { getNode } from '../data/route.js'
+
 export const FINE_AMOUNT = 5000
 
 const 重伤致命天数 = 2
@@ -2254,6 +2424,13 @@ export function checkEnding(state) {
     return { type: '被救援', 原因: '发出了求救信号，等来了救援队' }
   }
 
+  // 走到备用下撤点＝主动放弃，游戏同样结束。不认这条的话，从核桃坪或嵩坪寺
+  // 出山的玩家会卡在「叙事上已结束、引擎却一直返回 null」的死循环里。
+  const 当前节点 = getNode(state.place.nodeId)
+  if (当前节点 && 当前节点.类型 === '下撤') {
+    return { type: '主动下撤', 原因: `从${当前节点.名称}下撤出山，没走完全程` }
+  }
+
   if (state.place.nodeId === 终点节点) {
     return { type: '成功穿越', 原因: '走到了下板寺', 罚款: FINE_AMOUNT }
   }
@@ -2263,6 +2440,8 @@ export function checkEnding(state) {
 
 export function applyEnding(state, ending) {
   if (!ending) return state
+  // 幂等：重复调用不会再扣一次罚款。T17 重试回合时可能二次触发。
+  if (state.phase === '结局') return state
   state.phase = '结局'
   state.ending = ending
   if (ending.type === '成功穿越') {
@@ -2275,7 +2454,7 @@ export function applyEnding(state, ending) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/ending.test.js`
-Expected: PASS，13 个测试全绿
+Expected: PASS，16 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -2491,8 +2670,17 @@ export function resolveForeshadow(journal, 文本) {
   return true
 }
 
+// 状态词只收文字描述。裸数值与「好感」字样一律拒收——
+// 这不是防调用方手滑，而是因为它守的是文档最硬的一条约束：
+// 给 LLM 精确数值，它就会在对话里漏出来（禁止开天眼）。
+// 精确匹配而非见数字就拦，是为了放行「膝伤第2天」这类正当描述。
+const 档案泄漏字样 = /好感/
+const 档案纯数值 = /^\s*\d{1,3}\s*(\/\s*100)?\s*$/
+
 export function updateNpcStatus(journal, npcId, 状态) {
-  journal.人物状态[npcId] = 状态
+  const t = String(状态 ?? '').trim()
+  if (!t || 档案泄漏字样.test(t) || 档案纯数值.test(t)) return journal
+  journal.人物状态[npcId] = t
   return journal
 }
 
@@ -2538,7 +2726,7 @@ export function renderJournal(journal) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/journal.test.js`
-Expected: PASS，16 个测试全绿。特别确认「绝不泄漏数字好感」那条——它守的是文档最硬的一条约束。
+Expected: PASS，16 个测试全绿（计划正文原写 16，代码块实为 15 条，加守卫测试后正好 16）。特别确认「绝不泄漏数字好感」那条——它守的是文档最硬的一条约束。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -2758,17 +2946,14 @@ Expected: FAIL — 模块不存在
 ```js
 export const STATE_MARKER = '<<<STATE>>>'
 
-// 段落标记：半角与全角方括号都认
+// 段落标记：半角与全角方括号都认。正则预编译，别在每行上重新构造。
+// 尾部 (.*) 是为了接住「标记和首句写在同一行」的情况。
 const SECTIONS = [
-  { key: '标题', 名: '剧情标题' },
-  { key: '剧情', 名: '剧情' },
-  { key: '万象', 名: '鳌太万象' },
-  { key: '选项', 名: '下回选项' },
+  { key: '标题', 正则: /^[\[【]\s*剧情标题\s*[\]】]\s*(.*)$/ },
+  { key: '剧情', 正则: /^[\[【]\s*剧情\s*[\]】]\s*(.*)$/ },
+  { key: '万象', 正则: /^[\[【]\s*鳌太万象\s*[\]】]\s*(.*)$/ },
+  { key: '选项', 正则: /^[\[【]\s*下回选项\s*[\]】]\s*(.*)$/ },
 ]
-
-function 段落正则(名) {
-  return new RegExp(`^[\\[【]\\s*${名}\\s*[\\]】]\\s*$`)
-}
 
 // 把正文按段落标记切开。任何一段缺失都不算致命。
 function 切段(text) {
@@ -2777,9 +2962,20 @@ function 切段(text) {
   let 当前 = '_散'
 
   for (const line of lines) {
-    const hit = SECTIONS.find((s) => 段落正则(s.名).test(line.trim()))
-    if (hit) {
-      当前 = hit.key
+    const trimmed = line.trim()
+    let 命中 = null
+    for (const s of SECTIONS) {
+      const m = trimmed.match(s.正则)
+      if (m) {
+        命中 = { key: s.key, 余下: m[1].trim() }
+        break
+      }
+    }
+    if (命中) {
+      当前 = 命中.key
+      // 模型常把首句和段落标记挤在同一行。不收下这截的话，
+      // 这一行连同它之后的整段都会被归到上一个 bucket 里静默消失。
+      if (命中.余下) buckets[当前].push(命中.余下)
       continue
     }
     buckets[当前].push(line)
@@ -2803,8 +2999,13 @@ function 提取选项(lines) {
   for (const raw of lines) {
     const line = raw.trim()
     if (!line) continue
-    const m = line.match(/^([A-Da-d])\s*[.、．)）:：]?\s*(.+)$/)
-    if (m) out.push({ id: m[1].toUpperCase(), 文本: m[2].trim() })
+    // 标号连全角字母 Ａ-Ｄ 一并认。模型在中文语境下真的会打出全角字母，
+    // 只认 ASCII 的话整回合会解析出 0 个选项、直接掉进降级分支。
+    // NFKC 把 Ａ 归一成 A，顺带处理 ａ 这类小写全角。
+    // 正文首字符不能是分隔符本身，否则「A.」这种半截行会被解析成
+    // 文本为「.」的选项，还不进 errors——UI 上就是个标着句点的按钮。
+    const m = line.match(/^([A-Da-dＡ-Ｄａ-ｄ])\s*[.、．)）:：]?\s*([^\s.、．)）:：].*)$/)
+    if (m) out.push({ id: m[1].normalize('NFKC').toUpperCase(), 文本: m[2].trim() })
   }
   return out
 }
@@ -2848,6 +3049,18 @@ function 解析尾段(raw) {
   return { state: parsed, errors }
 }
 
+function 找尾段标记(raw) {
+  let 命中 = -1
+  let from = 0
+  for (;;) {
+    const i = raw.indexOf(STATE_MARKER, from)
+    if (i === -1) break
+    if (i === 0 || raw[i - 1] === '\n') 命中 = i
+    from = i + STATE_MARKER.length
+  }
+  return 命中
+}
+
 // 解析一整回合的模型输出。约定：本函数永不抛异常，问题一律进 errors。
 export function parseTurn(raw) {
   const 结果 = { 标题: '', 剧情: '', 万象: [], 选项: [], state: null, errors: [] }
@@ -2857,8 +3070,9 @@ export function parseTurn(raw) {
     return 结果
   }
 
-  // 正文里可能出现 STATE 字样（人物对话引用），取最后一个才是真尾段
-  const idx = raw.lastIndexOf(STATE_MARKER)
+  // 真正的尾段标记按协议独占一行。只认行首出现的那个，
+  // 这样对话里引用的 <<<STATE>>> 和 JSON 字符串值里的 <<<STATE>>> 都不会切错位置。
+  const idx = 找尾段标记(raw)
   const 正文 = idx === -1 ? raw : raw.slice(0, idx)
   const 尾段 = idx === -1 ? null : raw.slice(idx + STATE_MARKER.length)
 
@@ -2891,7 +3105,7 @@ export function parseTurn(raw) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/parser.test.js`
-Expected: PASS，18 个测试全绿。最后一条「从不抛异常」是这个模块的生命线——它失败就意味着线上会白屏。
+Expected: PASS，22 个测试全绿（计划正文原写 21，代码块实为 18，评审后补 4 条）。最后一条「从不抛异常」是这个模块的生命线——它失败就意味着线上会白屏。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -2910,6 +3124,13 @@ git commit -m "feat: 混合协议解析，容忍模型的各种不规矩输出"
 ---
 
 ### Task 14: 提议校验与夹取
+
+> **来自 T7 评审的预警：`state.js` 的写入函数不做入参卫生检查，这一层的把关全靠本任务。**
+>
+> 实测：`addItem(s, id, 档, -1)` 会造出 `数量: -1`、负负重的条目；`consumeItem(s, id, -10)` 会把 `余量` 从 100 涨到 110，等于凭空回满。`state.js` 不拦是对的——它是写入层，校验属于本模块的职责。
+>
+> **落实情况（T14 期间复核后修正）：** 复核发现 STATE 协议里**根本没有物品变更字段**——物品只由引擎按规则消耗，LLM 提议不了。所以这个洞不在本模块，而在 `state.js` 自己身上。已直接给 `addItem` / `removeItem` / `consumeItem` 加上「数量与百分比必须是有限正数」的守卫：写入层自己守住，不指望每个调用点都记得校验。本模块只管 LLM 真正能提议的东西（好感、记忆、伏笔、选项门槛、去向）。
+
 
 **Files:**
 - Create: `src/llm/validate.js`
@@ -3109,8 +3330,38 @@ function resolveNode(name) {
   if (!name || typeof name !== 'string') return null
   const t = name.trim()
   if (getNode(t)) return t
-  const hit = ROUTE.find((n) => n.名称 === t || n.名称.startsWith(t))
-  return hit ? hit.id : null
+  const 精确 = ROUTE.find((n) => n.名称 === t)
+  if (精确) return 精确.id
+  // 前缀匹配只在唯一命中时才认。「大」同时前缀匹配大爷海与大文公庙，
+  // 谁胜出取决于数组顺序——等于让模型的手滑决定玩家被送到哪个山头。
+  const 候选 = ROUTE.filter((n) => n.名称.startsWith(t))
+  return 候选.length === 1 ? 候选[0].id : null
+}
+
+// 代价也是 LLM 现编的。不夹的话「cost: {体力: -50}」就是白送体力，
+// 「9999」则一步把人耗干。校验放在这里，T17 拿到的就是干净值。
+const 代价上限 = { 体力: 50, 时段: 3, 金钱: 100000 }
+
+export function clampCost(cost) {
+  const warnings = []
+  const out = {}
+  if (!cost || typeof cost !== 'object' || Array.isArray(cost)) return { cost: out, warnings }
+
+  for (const [键, 值] of Object.entries(cost)) {
+    if (typeof 值 !== 'number' || !Number.isFinite(值)) {
+      warnings.push(`代价「${键}」不是有限数字，已剔除`)
+      continue
+    }
+    const 上限 = 代价上限[键]
+    if (上限 === undefined) {
+      warnings.push(`未知代价项「${键}」，已剔除`)
+      continue
+    }
+    const 夹 = Math.max(0, Math.min(上限, 值))
+    if (夹 !== 值) warnings.push(`代价 ${键} ${值} 越界，夹到 ${夹}`)
+    out[键] = 夹
+  }
+  return { cost: out, warnings }
 }
 
 export function clampRequire(类型, require) {
@@ -3135,7 +3386,10 @@ export function clampRequire(类型, require) {
         warnings.push(`好感门槛引用了未知人物「${名}」，已剔除`)
         continue
       }
-      if (typeof 值 !== 'number') continue
+      if (typeof 值 !== 'number' || !Number.isFinite(值)) {
+        warnings.push(`${名} 的好感门槛不是数字，已剔除`)
+        continue
+      }
       const 夹 = Math.max(0, Math.min(rule.好感, 值))
       if (夹 !== 值) warnings.push(`${名} 好感门槛 ${值} 越界，夹到 ${夹}`)
       out.好感[id] = 夹
@@ -3157,6 +3411,9 @@ export function clampRequire(类型, require) {
 export function validateProposal(state, proposal) {
   const out = { 好感变更: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return out
+  // 「从不抛异常」得对 state 也成立，否则调用方传进半截状态时一样白屏。
+  const 队伍 = Array.isArray(state?.party) ? state.party : []
+  const 当前节点 = state?.place?.nodeId ?? null
 
   for (const item of Array.isArray(proposal.好感) ? proposal.好感 : []) {
     if (!item || typeof item !== 'object') continue
@@ -3165,7 +3422,7 @@ export function validateProposal(state, proposal) {
       out.warnings.push(`好感提议引用了未知人物「${item.npc}」，已驳回`)
       continue
     }
-    if (!state.party.some((p) => p.npcId === npcId && p.在队)) {
+    if (!队伍.some((p) => p.npcId === npcId && p.在队)) {
       out.warnings.push(`${item.npc} 不在队，好感提议已驳回`)
       continue
     }
@@ -3197,13 +3454,14 @@ export function validateProposal(state, proposal) {
       continue
     }
     const { require, warnings } = clampRequire(opt.类型, opt.require)
-    out.warnings.push(...warnings)
-    out.选项.push({ id, 类型: opt.类型 || '徒步', require, cost: opt.cost || {} })
+    const { cost, warnings: cw } = clampCost(opt.cost)
+    out.warnings.push(...warnings, ...cw)
+    out.选项.push({ id, 类型: opt.类型 || '徒步', require, cost })
   }
 
   if (proposal.去向建议) {
     const id = resolveNode(proposal.去向建议)
-    if (id && isAdjacent(state.place.nodeId, id)) {
+    if (id && 当前节点 && isAdjacent(当前节点, id)) {
       out.去向 = id
     } else {
       out.warnings.push(`去向建议「${proposal.去向建议}」不是当前位置的合法相邻节点，已驳回`)
@@ -3217,7 +3475,7 @@ export function validateProposal(state, proposal) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/validate.test.js`
-Expected: PASS，18 个测试全绿
+Expected: PASS，23 个测试全绿（计划正文原写 21，代码块实为 18，评审后补 5 条）
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -3502,14 +3760,15 @@ export function buildRepairMessage(已生成正文) {
 
 ${已生成正文}
 
-现在请仅输出 ${STATE_MARKER} 及其后的 JSON 对象，不要重复正文，不要输出任何其他段落。`
+现在请仅输出 ${STATE_MARKER} 及其后的 JSON 对象，不要重复正文，不要输出任何其他段落。
+直接以 ${STATE_MARKER} 开头，前面不要加「好的」「以下是」之类的任何文字。`
 }
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/prompt.test.js`
-Expected: PASS，11 个测试全绿。「快照泄漏了数字好感」那条是硬约束——`buildUserMessage` 里绝不能出现 `p.好感`。
+Expected: PASS，13 个测试全绿。「快照泄漏了数字好感」那条是硬约束——`buildUserMessage` 里绝不能出现 `p.好感`。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -3855,7 +4114,9 @@ export async function streamChat({
     } catch (err) {
       const info = classifyError(err, null)
       最后错误 = 造错误(info)
-      if (!info.可重试) throw 最后错误
+      // 玩家主动取消也走 AbortError，和超时长得一样。信号已经 aborted 就别重试了——
+      // 人都走了还退避重试三次，纯属替玩家烧 token。
+      if (!info.可重试 || signal?.aborted) throw 最后错误
       await sleepImpl(backoffDelay(attempt))
       continue
     }
@@ -3863,7 +4124,7 @@ export async function streamChat({
     if (!response.ok) {
       const info = classifyError(null, response)
       最后错误 = 造错误(info)
-      if (!info.可重试) throw 最后错误
+      if (!info.可重试 || signal?.aborted) throw 最后错误
       await sleepImpl(backoffDelay(attempt))
       continue
     }
@@ -3918,6 +4179,13 @@ git commit -m "feat: OpenAI 兼容客户端，SSE 流式与错误分类"
 ---
 
 ### Task 17: 回合编排与原子应用
+
+> **来自 T7 / T9 评审的三条预警，本任务是它们的落点：**
+>
+> 1. **`restore` 返回新对象，不原地改。** 回滚必须写成 `s = restore(snap)`。若别处还持有旧的 `s` 引用（比如传进了某个闭包），那些引用仍指向脏状态。
+> 2. **海拔有两个真相来源。** `sleep()` 按 `getNode(place.nodeId).海拔` 判是否累计高山适应，而 `stepStaminaCost()` 直接读 `place.海拔`。移动玩家时**两者必须同时更新**，否则会出现「按老节点算适应、按新海拔算消耗」的错位。建议移动统一走一个 helper。
+> 3. **`rest` / `eatHot` / `eatCold` 不推进时钟。** 它们只改体力和物资，`advanceSlot` 要由本任务显式调用。spec 写的「休整消耗一个时段」是在这里兑现的。
+
 
 **Files:**
 - Create: `src/turn.js`
@@ -4196,6 +4464,7 @@ Expected: FAIL — 模块不存在
 
 ```js
 import { snapshot, restore } from './engine/state.js'
+import { makeRng } from './engine/rng.js'
 import { judgeOption } from './engine/threshold.js'
 import { applyStepCost, advanceSlot, dailyUpkeep } from './engine/consume.js'
 import { applyAffinityDelta } from './engine/affinity.js'
@@ -4204,17 +4473,18 @@ import { recordNode, recordEvent, addForeshadow, resolveForeshadow, compressJour
 import { getNode } from './data/route.js'
 import { buildSystemPrompt, buildUserMessage, buildRepairMessage } from './llm/prompt.js'
 import { parseTurn } from './llm/parser.js'
-import { validateProposal } from './llm/validate.js'
+import { validateProposal, clampRequire, clampCost } from './llm/validate.js'
 import { streamChat } from './llm/client.js'
 
 export const MAX_REPAIR = 2
 
 // 尾段彻底解析不出来时的兜底选项。宁可玩法单调，也不能让游戏卡死。
+// 字段与正常选项同形：UI 渲染和回传 选中项 时不必区分两种形状。
 export const FALLBACK_OPTIONS = [
-  { id: 'A', 文本: '继续按原计划前进' },
-  { id: 'B', 文本: '原地休整，恢复体力' },
-  { id: 'C', 文本: '找同伴聊两句' },
-  { id: 'D', 文本: '清点装备和剩余补给' },
+  { id: 'A', 文本: '继续按原计划前进', 类型: '徒步', require: {}, cost: {} },
+  { id: 'B', 文本: '原地休整，恢复体力', 类型: '徒步', require: {}, cost: {} },
+  { id: 'C', 文本: '找同伴聊两句', 类型: '社交', require: {}, cost: {} },
+  { id: 'D', 文本: '清点装备和剩余补给', 类型: '徒步', require: {}, cost: {} },
 ]
 
 function 就地覆盖(target, source) {
@@ -4230,12 +4500,26 @@ export async function runTurn({
   state, journal, 选中项, 最近回合 = [], config,
   onDelta, streamImpl = streamChat, rng,
 }) {
+  // 已经落幕的局不再推进。引擎不拦的话，UI 多点一次就会又算出一个结局对象。
+  if (state.phase === '结局') {
+    return { ok: false, 降级: false, error: { kind: 'ended', 提示: '这一局已经结束了。' }, ending: state.ending }
+  }
+
   const snap = snapshot(state)
   const 档案快照 = JSON.stringify(journal)
 
   try {
     // —— 判定先行 ——
-    const 判定 = judgeOption(选中项, state, rng || (() => 0.5))
+    // 防御性重夹：选项的 require/cost 本该是上回合 validateProposal 夹取过的版本，
+    // 但那全靠 UI 自觉存对东西。这里再夹一次，夹取就与调用方的纪律无关了。
+    const { require: 净门槛 } = clampRequire(选中项.类型, 选中项.require)
+    const { cost: 净代价 } = clampCost(选中项.cost)
+    选中项 = { ...选中项, require: 净门槛, cost: 净代价 }
+
+    // rng 缺省时按存档种子推导，而不是退化成恒定 0.5。
+    // spec 承诺「同一存档重放结果一致」，一个常量默认值会让这条承诺静默失效，
+    // 而且失效得毫无声响——调用方永远不会发现自己忘了传。
+    const 判定 = judgeOption(选中项, state, rng || makeRng(state.meta.随机种子))
     const 体力前 = state.pc.体力
     const 日前 = state.clock.day
 
@@ -4310,7 +4594,9 @@ export async function runTurn({
       recordNode(journal, v.去向)
     }
     if (parsed.state.天气建议) {
-      state.weather = { 状态: String(parsed.state.天气建议), 等级: state.weather.等级 }
+      // 这是唯一不经 validateProposal 的 LLM 字段（纯展示、不参与任何判定），
+      // 但仍要截断——模型偶尔会把整段天气描写塞进来。
+      state.weather = { 状态: String(parsed.state.天气建议).slice(0, 40), 等级: state.weather.等级 }
     }
 
     // LLM 申报的门槛挂回选项上，供下回合判定与置灰使用
@@ -4345,7 +4631,7 @@ export async function runTurn({
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/turn.test.js`
-Expected: PASS，18 个测试全绿。**「网络整体失败 → 回滚」和「降级时不结算好感」两条是这个模块存在的全部理由**，它们绿了这个 Task 才算成。
+Expected: PASS，21 个测试全绿。**「网络整体失败 → 回滚」和「降级时不结算好感」两条是这个模块存在的全部理由**，它们绿了这个 Task 才算成。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -4601,3 +4887,47 @@ git commit -m "feat: 端到端冒烟脚本与真实响应 fixture"
 
 存档 `persist` → 立绘占位 `portraits` → API 配置界面 → 捏人 → 抽卡 → 商店 → 主界面 → 结局页 → 单文件交付与 base64 烘焙 → 12 份 NPC 生图 prompt。
 
+
+---
+
+## 交接给计划二的待办（来自分支整体评审）
+
+计划一的核心契约是成立的：判定先行、LLM 输出必过 `validateProposal`、失败整体回滚。以下是**引擎有意留白或确实缺失**的部分，计划二开工前应先处理前三条。
+
+### 必须处理
+
+**1. `state.flags.失温连败` 从来没人增加它 —— 那条结局是死代码**
+
+`ending.js` 会读 `失温连败 >= 3` 判「失败遇险」，但计划一没有任何模块写这个字段。测试是手工把它设成 3 来验条件分支的，**通往那里的路并不存在**。
+
+缺的是温度机制：`sleep()` 目前完全不看气温，也不看睡袋温标。要让这条结局活过来，需要在 `sleep()` 里比对 `SEASONS[季节].夜间温度` 与「睡袋温标 − 内胆加成」，不够暖就 `失温连败++`，够暖则归零。所有数据都在，只差接线。
+
+**2. NPC 的 `在队` 与 `状态` 引擎不维护，UI 必须自己管**
+
+`state.party[].在队` 初始化为 `true` 后永不改变；`state.party[].状态` 永远是 `'正常'`。当 LLM 叙述「王大鹏膝伤下撤了」，UI 必须自己把 `在队` 置 false——否则好感门槛仍会为一个已经离队的人放行，玩家会看到对着空气搭话的选项。
+
+注意这里有**两套人物状态**：`state.party[].状态`（进 user message 的状态快照）和 `journal.人物状态`（进旅程档案，由 `updateNpcStatus` 维护）。两者都要更新，目前没有任何地方写明这件事。
+
+**3. `state.weather.等级` 是个孤儿字段**
+
+初始化为 1 后没有任何写入方。LLM 的 `天气建议` 只改 `状态`（描述文字）。`sleep()` 的 `恶劣天气` 参数需要调用方自己判断，而「什么算恶劣」没有定义。要么给 `等级` 接上写入逻辑并让 `stepStaminaCost` / `sleep` 读它，要么就把它删掉——留着一个不起作用的字段只会误导人。
+
+### 数据里写了效果、引擎没实现的装备
+
+以下 `EXTRA_GEAR` 的 `作用` 描述听起来像机制，实际只是给 LLM 看的叙事钩子。**最危险的是 `bag_liner`**：它有 `温标加成: 5` 这个货真价实的数值字段，`seasons.js` 的采购警告会用它，但 `sleep()` 根本不读——玩家照着警告买了内胆，睡眠回复一点没变。
+
+| 物资 | 数据里写的 | 引擎实际 |
+|---|---|---|
+| `bag_liner` | 温标加成 5 | 只影响采购警告，不影响睡眠 |
+| `down_jacket` | 夜间体力回复加成 | 无 |
+| `knee_brace` / `spare_socks` | 伤病 / 失温抵抗 | 无 |
+| `camera` / `tripod` / `booze_snacks` / `spare_meds` | 好感加成 | 无 |
+| `trekking_poles` / `camp_stool` | 体力 −1 / 休整 +2 | **已接线** |
+
+计划二要么补上接线，要么把这些 `作用` 改写成明确的叙事提示，别让它读起来像承诺。
+
+### 其它
+
+- `rollInt` 至今没有任何生产代码调用，只在测试和构建探针里用。留着无害，但要知道它是死导出。
+- 流中途断开时 `streamChat` 只是正常返回已收到的文本，**引擎分不清「正常结束」和「被截断」**。spec 第 9 节写的「提供续写按钮」需要先有截断检测。
+- 「上下文超限时最近回合由 3 降 1」没有自动化，`prompt.js` 固定 `slice(-3)`，降级要调用方自己决定。
