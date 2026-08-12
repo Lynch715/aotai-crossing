@@ -194,10 +194,6 @@ button.primary { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
 }
 
 /* 手机下改纵向堆叠 */
-@media (max-width: 640px) {
-  .game-layout { flex-direction: column; }
-  .game-sidebar { width: 100%; }
-}
 
 /* 左栏面板内部 */
 .game-stat-row {
@@ -423,4 +419,91 @@ button.primary { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
 @keyframes thinking-pulse {
   0%, 100% { opacity: .25; transform: scale(.8); }
   50%      { opacity: 1;   transform: scale(1.15); }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   手机适配
+   此前只有 3 行媒体查询（只管了主界面双栏），商店、捏人、标签
+   全没适配：物品名被挤成每行两三个字，档位标签每个折成三行，
+   行还溢出右边。
+   ══════════════════════════════════════════════════════════════ */
+
+/* flex 子项默认 min-width:auto，长中文撑不下就把容器顶爆。
+   全局放开是治横向溢出最省事也最彻底的一招。 */
+.row, .row-between, .item-row, .game-layout, .game-topbar,
+.companion-row, .stage, .options-area { min-width: 0; }
+.row > *, .row-between > *, .item-row > * { min-width: 0; }
+
+html, body { overflow-x: hidden; }
+
+@media (max-width: 700px) {
+  #app { padding: 14px 12px 48px; }
+
+  h1 { font-size: 19px; }
+  h2 { font-size: 15px; }
+  .panel { padding: 12px; }
+
+  /* 顶栏：允许换行，别把海拔天气挤出屏幕 */
+  .game-topbar { flex-wrap: wrap; gap: 4px 10px; }
+
+  /* .row 是通用横排容器，窄屏一律允许换行。
+     不换行的话，抽卡的两张人物卡会硬挤在一行——右边那张直接被切掉，
+     卡片内的技能标签也会互相叠住。 */
+  .row { flex-wrap: wrap; }
+
+  /* 横排容器里的卡片改为整行独占，纵向堆叠 */
+  .row > .panel { flex: 1 1 100%; }
+
+  /* 主界面改纵向：左栏面板压到顶部 */
+  .game-layout { flex-direction: column; }
+  .game-sidebar, .sidebar { width: 100%; }
+
+  /* 商店/技能行：名字独占一行，档位在下面横排。
+     这是溢出的主因——名字和档位组挤在一行，名字被压到 100px 宽。 */
+  .item-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 9px 10px;
+  }
+  .item-row .item-name { font-size: 13px; line-height: 1.5; }
+  .item-row .row { flex-wrap: wrap; gap: 6px; }
+
+  /* 档位标签：内容不许折行，否则「经济 ¥750 2.5kg」会变成三行 */
+  .tag {
+    white-space: nowrap;
+    font-size: 11px;
+    padding: 6px 9px;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* 手指点得中：按钮最小 44px 高是通用可点尺寸下限 */
+  button { min-height: 44px; padding: 10px 14px; }
+  .tag { min-height: 34px; }
+
+  /* 选项区：整块可点，文案给足空间 */
+  .options-area .option { padding: 12px; }
+  .option-meta { font-size: 11px; }
+
+  /* 立绘舞台：手机上缩一半，否则一屏放不下两个人还挤掉剧情 */
+  .stage { gap: 8px; flex-wrap: wrap; }
+  .stage-figure { width: 58px; }
+  .stage-portrait { width: 58px; height: 78px; }
+  .stage-name { font-size: 10px; }
+
+  /* 同行者头像同理 */
+  .companion-portrait { width: 34px; height: 46px; }
+
+  /* 表单控件在 iOS 上字号小于 16px 会触发自动放大，
+     而我们已经禁了缩放，放大后回不来——一律给到 16px */
+  input, select, textarea { font-size: 16px; }
+}
+
+@media (max-width: 420px) {
+  #app { padding: 12px 10px 44px; }
+  .stage-figure { width: 50px; }
+  .stage-portrait { width: 50px; height: 67px; }
+  .tag { font-size: 10px; padding: 6px 7px; }
 }
