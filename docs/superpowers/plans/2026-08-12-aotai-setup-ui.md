@@ -43,6 +43,8 @@ Task 5 会把这条约束固化成一条测试。
 | 文件 | 职责 |
 |---|---|
 | `src/engine/party.js` | **新增。** 队友在队状态与人物状态的唯一改动入口，同时写 `state` 与 `journal`，杜绝两处不同步 |
+| `src/llm/validate.js` | 修改。新增 `离队` 提议字段——否则 `party.js` 是死代码 |
+| `src/llm/prompt.js` | 修改。协议说明与范例里加上 `离队` |
 | `src/engine/consume.js` | 修改。`sleep()` 接入失温判定，维护 `flags.失温连败` |
 | `src/llm/validate.js` | 修改。`天气建议` 解析出 `{状态, 等级}`，让 `weather.等级` 不再是孤儿 |
 | `src/data/gear.js` | 修改。补一款极寒睡袋，让冬季那条消不掉的警告能被消除 |
@@ -207,6 +209,219 @@ Expected: 全绿
 ```bash
 git add src/engine/party.js test/party.test.js build.mjs
 git commit -m "feat: 队友在队状态的唯一改动入口
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 1B: 让模型有办法说「这个人走了」
+
+Task 1 建好了 `party.js`，但**没有任何路径能调到它**——实测确认：
+
+- `validateProposal` 返回 `{好感变更, 记忆, 伏笔, 选项, 去向, warnings}`，**没有离队字段**
+- `src/llm/prompt.js` 里「离队」「下撤」「退出」一个字都没有
+
+也就是说模型可以在正文里写「王大鹏膝伤严重，从水窝子下撤了」，而引擎永远不会知道。下一回合玩家照样能对着他搭话，好感门槛照样为他放行。
+
+这正是计划一里 `失温连败` 的翻版：写了个模块，没有触发它的路。**不补这一步，Task 1 就是死代码。**
+
+**Files:**
+- Modify: `src/llm/validate.js`
+- Modify: `src/llm/prompt.js`
+- Modify: `src/turn.js`
+- Test: `test/validate.test.js`、`test/turn.test.js`（追加）
+
+- [ ] **Step 1: 追加失败的测试**
+
+`test/validate.test.js` 追加：
+
+```js
+test('离队提议按名字解析，写进 离队', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '王大鹏', 因: '膝伤严重，从水窝子下撤' }] })
+  assert.equal(r.离队.length, 1)
+  assert.equal(r.离队[0].npcId, 'wangdapeng')
+  assert.ok(r.离队[0].因.includes('膝伤'))
+})
+
+test('认不出的人不当离队处理，记 warning', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '张三丰', 因: 'x' }] })
+  assert.deepEqual(r.离队, [])
+  assert.ok(r.warnings.some((w) => w.includes('张三丰')))
+})
+
+test('本就不在队伍里的人不能被离队', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '踏雪', 因: 'x' }] })
+  assert.deepEqual(r.离队, [])
+  assert.ok(r.warnings.length > 0)
+})
+
+test('已经离队的人不会被重复处理', () => {
+  const s = 局面()
+  s.party.find((p) => p.npcId === 'chenyan').在队 = false
+  const r = validateProposal(s, { 离队: [{ npc: '陈岩', 因: '又走一次' }] })
+  assert.deepEqual(r.离队, [])
+})
+
+test('离队原因过长会被截断', () => {
+  const s = 局面()
+  const r = validateProposal(s, { 离队: [{ npc: '陈岩', 因: '啊'.repeat(200) }] })
+  assert.ok(r.离队[0].因.length <= 30, `没截断：${r.离队[0].因.length}`)
+})
+
+test('没有离队字段时 离队 是空数组而不是 undefined', () => {
+  assert.deepEqual(validateProposal(局面(), {}).离队, [])
+})
+```
+
+`test/turn.test.js` 追加：
+
+```js
+test('模型报了离队，引擎真的让人离队', async () => {
+  const s = 局面()
+  const j = createJournal()
+  const r = await runTurn({
+    state: s, journal: j,
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({
+      text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{"离队":[{"npc":"陈岩","因":"膝伤下撤"}]}',
+    }),
+  })
+  assert.equal(r.ok, true)
+  const 陈 = s.party.find((p) => p.npcId === 'chenyan')
+  assert.equal(陈.在队, false, '模型说他走了，引擎却没让他走')
+  assert.equal(陈.状态, '膝伤下撤')
+})
+
+test('离队后好感门槛不再为他放行', async () => {
+  const s = 局面()
+  // 陈岩初始好感 45，门槛 40 本该达标
+  const { gap: 离队前 } = gapFor({ 好感: { chenyan: 40 } }, s)
+  assert.equal(离队前, 0)
+
+  await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({
+      text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{"离队":[{"npc":"陈岩","因":"下撤"}]}',
+    }),
+  })
+  const { gap: 离队后 } = gapFor({ 好感: { chenyan: 40 } }, s)
+  assert.equal(离队后, UNREACHABLE, '人都走了，门槛还放行')
+})
+```
+
+`test/turn.test.js` 顶部导入补上：
+
+```js
+import { gapFor, UNREACHABLE } from '../src/engine/threshold.js'
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npm test -- test/validate.test.js test/turn.test.js`
+Expected: FAIL — `r.离队` 是 undefined
+
+- [ ] **Step 3: 改 validate.js**
+
+`validateProposal` 的 `out` 初始化补上 `离队: []`：
+
+```js
+  const out = { 好感变更: [], 离队: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
+```
+
+在好感那个循环之后插入：
+
+```js
+  // 离队。没有这一段，模型只能在正文里叙述某人下撤，引擎永远不知道——
+  // 下一回合玩家照样能对着他搭话，好感门槛照样为他放行。
+  for (const item of Array.isArray(proposal.离队) ? proposal.离队 : []) {
+    if (!item || typeof item !== 'object') continue
+    const npcId = resolveNpc(item.npc)
+    if (!npcId) {
+      out.warnings.push(`离队提议里认不出这个人：${item.npc}`)
+      continue
+    }
+    const 同伴 = 队伍.find((p) => p.npcId === npcId)
+    if (!同伴) {
+      out.warnings.push(`${item.npc} 本就不在队伍里，忽略离队提议`)
+      continue
+    }
+    if (!同伴.在队) {
+      out.warnings.push(`${item.npc} 已经离队，忽略重复提议`)
+      continue
+    }
+    out.离队.push({ npcId, 因: String(item.因 || '离队').slice(0, 30) })
+  }
+```
+
+- [ ] **Step 4: 在 turn.js 里应用**
+
+导入行补上：
+
+```js
+import { npcLeaves } from './engine/party.js'
+```
+
+在应用好感变更的循环之后插入：
+
+```js
+      for (const 离 of v.离队) {
+        npcLeaves(state, journal, 离.npcId, 离.因)
+      }
+```
+
+- [ ] **Step 5: 教模型这个字段存在**
+
+`src/llm/prompt.js` 的协议说明里，`好感` 字段之后补一条。**照该文件已有的行文风格写**，要点：
+
+- 字段名 `离队`，形如 `"离队":[{"npc":"王大鹏","因":"膝伤严重，从水窝子下撤"}]`
+- **只在剧情真的写了某人离开时才报**，不要因为对方沉默或走得慢就报
+- 离队不可逆，报错了收不回来
+- 「因」控制在 30 字以内
+
+并在 STATE 范例里加上这个字段，让模型有样可循。
+
+- [ ] **Step 6: 跑测试确认通过**
+
+Run: `npm test`
+Expected: 全绿
+
+- [ ] **Step 7: 验证回路真的闭上了**
+
+Run:
+
+```bash
+node --input-type=module -e "
+import { validateProposal } from './src/llm/validate.js'
+import { buildSystemPrompt } from './src/llm/prompt.js'
+console.log('validateProposal 返回字段:', Object.keys(validateProposal({party:[]}, {})).join(', '))
+console.log('system prompt 提到离队:', buildSystemPrompt().includes('离队'))
+"
+```
+
+Expected：字段列表里有 `离队`，且 system prompt 里提到了它。**两者缺一，回路就没闭上。**
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add src/llm/validate.js src/llm/prompt.js src/turn.js test/validate.test.js test/turn.test.js
+git commit -m "feat: 让模型有办法报告队友离队
+
+Task 1 建好了 party.js，却没有任何路径能调到它：validateProposal
+没有离队字段，system prompt 里也一个字没提。模型可以在正文里写
+「王大鹏从水窝子下撤了」，引擎永远不知道——下一回合玩家照样能
+对着他搭话，好感门槛照样为他放行。
+
+和计划一里 失温连败 是同一种毛病：写了模块，没有触发它的路。
+
+现在补上 离队 字段：校验层解析人名、拒绝重复与不存在者，
+编排层调 npcLeaves，system prompt 教模型何时该报。
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
