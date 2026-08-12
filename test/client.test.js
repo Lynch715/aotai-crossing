@@ -232,3 +232,21 @@ test('每个预设的 baseURL 都是 https', () => {
     assert.ok(p.baseURL.startsWith('https://'), `${p.名称} 的 baseURL 不是 https：${p.baseURL}`)
   }
 })
+
+test('feedSSE 抓得到 finish_reason —— 截断的铁证', () => {
+  const 帧 = 'data: ' + JSON.stringify({ choices: [{ delta: { content: '甲' }, finish_reason: 'length' }] }) + '\n\n'
+  const r = feedSSE('', 帧)
+  assert.equal(r.finish, 'length')
+})
+
+test('feedSSE 统计推理长度但不显示它', () => {
+  const 帧 = 'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '我在想……' } }] }) + '\n\n'
+  const r = feedSSE('', 帧)
+  assert.deepEqual(r.deltas, [], '思考内容不该上屏')
+  assert.equal(r.reasoning, 5, '但要记下它烧了多少')
+})
+
+test('正常结束时 finish 是 stop 而非 length', () => {
+  const 帧 = 'data: ' + JSON.stringify({ choices: [{ delta: { content: '甲' }, finish_reason: 'stop' }] }) + '\n\n'
+  assert.equal(feedSSE('', 帧).finish, 'stop')
+})

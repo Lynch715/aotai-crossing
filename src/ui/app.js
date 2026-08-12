@@ -822,6 +822,33 @@ function renderGame(router) {
     })
     if (APP会话.最近回合.length > 4) APP会话.最近回合.shift()
 
+    // 降级诊断。此前 UI 完全无视 r.降级 与 r.warnings——模型没按格式回时，
+    // 玩家只会看到四个来路不明的兜底选项，既不知道出了什么事，也没法反馈。
+    // 静默降级比报错更难查。
+    if (r.降级 || (r.warnings && r.warnings.length)) {
+      const APP诊断 = el('div', { class: r.降级 ? 'notice warn' : 'notice info' })
+      APP诊断.appendChild(el('div', {
+        text: r.降级
+          ? '模型这回合没按格式回复，已用备用选项让你继续走。本回合的好感与记忆未结算。'
+          : '本回合有几处提议被校验拦下了（不影响继续玩）。',
+      }))
+      for (const w of r.warnings || []) {
+        APP诊断.appendChild(el('div', { class: 'muted', text: '· ' + w }))
+      }
+      if (r.原文) {
+        const APP展开 = el('button', { class: 'link-btn' }, ['查看模型原始回复'])
+        const APP原文 = el('pre', { class: 'raw-dump', hidden: true })
+        setText(APP原文, r.原文)
+        APP展开.addEventListener('click', () => {
+          APP原文.hidden = !APP原文.hidden
+          setText(APP展开, APP原文.hidden ? '查看模型原始回复' : '收起')
+        })
+        APP诊断.appendChild(APP展开)
+        APP诊断.appendChild(APP原文)
+      }
+      APP错误位.appendChild(APP诊断)
+    }
+
     // 回合解析完成：停止打字机，用干净的 r.剧情 替换原文。
     // 打字机在流式阶段推送的是完整原文（含协议头，如 == 标题 ==、== STATE == 等），
     // 解析后要换成只有正文的版本，否则玩家会看到协议行。

@@ -507,3 +507,30 @@ html, body { overflow-x: hidden; }
   .stage-portrait { width: 50px; height: 67px; }
   .tag { font-size: 10px; padding: 6px 7px; }
 }
+
+/* 降级诊断：模型没按格式回时，把原始回复摆出来。
+   静默降级比报错更难查——玩家只看到四个来路不明的兜底选项。 */
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent-bright);
+  padding: 6px 0;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  min-height: 0;
+}
+.raw-dump {
+  margin: 6px 0 0;
+  padding: 10px;
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 320px;
+  overflow-y: auto;
+}

@@ -80,7 +80,7 @@ export async function runTurn({
     // —— 请求 ——
     const system = buildSystemPrompt()
     const user = buildUserMessage({ state, journal, 既成事实, 最近回合 })
-    const { text } = await streamImpl({
+    const { text, finish, reasoning } = await streamImpl({
       config, onDelta,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
     })
@@ -110,6 +110,15 @@ export async function runTurn({
       ok: true, 降级: false, 判定,
       标题: parsed.标题, 剧情: parsed.剧情, 万象: parsed.万象,
       选项: parsed.选项, warnings: [...parsed.errors], ending: null, 原文: text,
+      finish: finish ?? null, reasoning: reasoning ?? 0,
+    }
+
+    // finish_reason === 'length' 是被 max_tokens 截断的铁证。
+    // 不点破的话，正文缺一半、STATE 没了，只能靠猜。
+    if (finish === 'length') {
+      结果.warnings.push(`模型回复被 max_tokens 截断（finish_reason=length）${reasoning ? `，其中思考内容 ${reasoning} 字` : ''}——调大「最大输出」再试`)
+    } else if (reasoning > 0) {
+      结果.warnings.push(`模型输出了 ${reasoning} 字思考内容（不显示，但占用输出预算）`)
     }
 
     // —— 降级：正文保留，本回合不结算 ——

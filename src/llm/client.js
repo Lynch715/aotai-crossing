@@ -54,6 +54,12 @@ export function feedSSE(buffer, chunk) {
   const rest = 帧.pop()
   const deltas = []
   let done = false
+  // finish_reason === 'length' 是「被 max_tokens 截断」的铁证。
+  // 不抓它的话，正文缺一半、STATE 没了，只能靠猜。
+  let finish = null
+  // 有些模型把思考过程放在 reasoning_content，我们不显示它，
+  // 但它照样烧 max_tokens——记下长度，好判断预算是不是被思考吃光了。
+  let reasoning = 0
 
   for (const f of 帧) {
     for (const line of f.split('\n')) {
@@ -64,12 +70,16 @@ export function feedSSE(buffer, chunk) {
         const obj = JSON.parse(payload)
         const d = obj?.choices?.[0]?.delta?.content
         if (typeof d === 'string' && d) deltas.push(d)
+        const rc = obj?.choices?.[0]?.delta?.reasoning_content
+        if (typeof rc === 'string') reasoning += rc.length
+        const fr = obj?.choices?.[0]?.finish_reason
+        if (fr) finish = fr
       } catch {
         // 畸形帧直接跳过——流里偶尔会有半个 JSON，不值得中断整轮
       }
     }
   }
-  return { deltas, rest, done }
+  return { deltas, rest, done, finish, reasoning }
 }
 
 function 拼接URL(baseURL) {
@@ -104,7 +114,7 @@ export async function streamChat({
           messages,
           stream: true,
           temperature: config.temperature ?? 0.8,
-          max_tokens: config.maxTokens ?? 2048,
+          max_tokens: config.maxTokens ?? 4096,
         }),
         signal,
       })
@@ -130,6 +140,8 @@ export async function streamChat({
     const decoder = new TextDecoder()
     let buffer = ''
     let text = ''
+    let finish = null
+    let reasoning = 0
 
     try {
       for (;;) {
@@ -137,6 +149,8 @@ export async function streamChat({
         if (done) break
         const r = feedSSE(buffer, decoder.decode(value, { stream: true }))
         buffer = r.rest
+        if (r.finish) finish = r.finish
+        reasoning += r.reasoning
         for (const d of r.deltas) {
           text += d
           if (onDelta) onDelta(d)
@@ -147,7 +161,7 @@ export async function streamChat({
       reader.releaseLock()
     }
 
-    return { text }
+    return { text, finish, reasoning }
   }
 
   throw 最后错误 || 造错误({ kind: 'network', 可重试: true, 提示: '请求失败。' })
