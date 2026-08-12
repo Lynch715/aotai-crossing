@@ -12,14 +12,28 @@ export function esc(v) {
   return String(v).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
 }
 
+// href/src 这类属性走的是 setAttribute，innerHTML 护栏完全扫不到。
+// LLM 写的字符串一旦流进来，玩家点一下链接就执行了——和注入 onerror 是一回事。
+const DOM_URL_ATTRS = new Set(['href', 'src', 'action', 'formaction', 'xlink:href'])
+const DOM_UNSAFE_URL = /^\s*javascript:/i
+
 export function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag)
   for (const [k, v] of Object.entries(attrs)) {
     if (v === null || v === undefined || v === false) continue
     if (k === 'class') node.className = v
     else if (k === 'text') node.textContent = String(v)
-    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v)
-    else node.setAttribute(k, String(v))
+    else if (k.startsWith('on')) {
+      // 只收函数。传字符串的话会掉进下面的 setAttribute，变成 onclick="..." 内联
+      // 处理器——正是本模块存在的理由要杜绝的东西。宁可大声报错也不能悄悄放行。
+      if (typeof v !== 'function') throw new Error(`el(): ${k} 只能接函数，收到 ${typeof v}`)
+      node.addEventListener(k.slice(2), v)
+    } else {
+      if (DOM_URL_ATTRS.has(k) && DOM_UNSAFE_URL.test(String(v))) {
+        throw new Error(`el(): ${k} 不接受 javascript: URL`)
+      }
+      node.setAttribute(k, String(v))
+    }
   }
   for (const c of [].concat(children)) {
     if (c === null || c === undefined || c === false) continue
