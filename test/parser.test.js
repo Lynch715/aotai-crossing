@@ -130,6 +130,26 @@ test('选项标号用全角字母也认', () => {
   assert.equal(r.选项[3].文本, '丁选项')
 })
 
+test('标记和首句挤在同一行时，整段不会静默消失', () => {
+  const r = parseTurn(`[剧情] 林晓雅蹲下把登山杖收短\n她回头喊了一句\n\n[鳌太万象] 后队在雾里停了很久\n2. 风向由西转北\n\n[下回选项]\nA. 甲`)
+  assert.ok(r.剧情.includes('登山杖'), '标记同行的首句丢了')
+  assert.ok(r.剧情.includes('回头喊'), '同行标记之后的整段也丢了')
+  assert.deepEqual(r.万象, ['后队在雾里停了很久', '风向由西转北'])
+  assert.equal(r.选项.length, 1)
+})
+
+test('半截选项行不会变成文本为分隔符的假选项', () => {
+  const r = parseTurn(`[下回选项]\nA.\nB. 有正文的选项`)
+  assert.equal(r.选项.length, 1, `不该收下半截行，实得 ${JSON.stringify(r.选项)}`)
+  assert.equal(r.选项[0].id, 'B')
+})
+
+test('JSON 字符串值里出现 STATE 标记也不切错位置', () => {
+  const r = parseTurn(`[剧情]\n正文\n\n[下回选项]\nA. 甲\n\n${STATE_MARKER}\n{"记忆":["队友说别管那个 ${STATE_MARKER} 标记"]}`)
+  assert.ok(r.state, `尾段该解析成功，实际 errors: ${r.errors}`)
+  assert.ok(r.state.记忆[0].includes(STATE_MARKER))
+})
+
 test('缺少标题段时标题为空串，不报错', () => {
   const r = parseTurn(`[剧情]\n只有正文\n\n[下回选项]\nA. 甲`)
   assert.equal(r.标题, '')

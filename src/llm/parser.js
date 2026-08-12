@@ -1,16 +1,13 @@
 export const STATE_MARKER = '<<<STATE>>>'
 
-// 段落标记：半角与全角方括号都认
+// 段落标记：半角与全角方括号都认。正则预编译，别在每行上重新构造。
+// 尾部 (.*) 是为了接住「标记和首句写在同一行」的情况。
 const SECTIONS = [
-  { key: '标题', 名: '剧情标题' },
-  { key: '剧情', 名: '剧情' },
-  { key: '万象', 名: '鳌太万象' },
-  { key: '选项', 名: '下回选项' },
+  { key: '标题', 正则: /^[\[【]\s*剧情标题\s*[\]】]\s*(.*)$/ },
+  { key: '剧情', 正则: /^[\[【]\s*剧情\s*[\]】]\s*(.*)$/ },
+  { key: '万象', 正则: /^[\[【]\s*鳌太万象\s*[\]】]\s*(.*)$/ },
+  { key: '选项', 正则: /^[\[【]\s*下回选项\s*[\]】]\s*(.*)$/ },
 ]
-
-function 段落正则(名) {
-  return new RegExp(`^[\\[【]\\s*${名}\\s*[\\]】]\\s*$`)
-}
 
 // 把正文按段落标记切开。任何一段缺失都不算致命。
 function 切段(text) {
@@ -19,9 +16,20 @@ function 切段(text) {
   let 当前 = '_散'
 
   for (const line of lines) {
-    const hit = SECTIONS.find((s) => 段落正则(s.名).test(line.trim()))
-    if (hit) {
-      当前 = hit.key
+    const trimmed = line.trim()
+    let 命中 = null
+    for (const s of SECTIONS) {
+      const m = trimmed.match(s.正则)
+      if (m) {
+        命中 = { key: s.key, 余下: m[1].trim() }
+        break
+      }
+    }
+    if (命中) {
+      当前 = 命中.key
+      // 模型常把首句和段落标记挤在同一行。不收下这截的话，
+      // 这一行连同它之后的整段都会被归到上一个 bucket 里静默消失。
+      if (命中.余下) buckets[当前].push(命中.余下)
       continue
     }
     buckets[当前].push(line)
@@ -48,7 +56,9 @@ function 提取选项(lines) {
     // 标号连全角字母 Ａ-Ｄ 一并认。模型在中文语境下真的会打出全角字母，
     // 只认 ASCII 的话整回合会解析出 0 个选项、直接掉进降级分支。
     // NFKC 把 Ａ 归一成 A，顺带处理 ａ 这类小写全角。
-    const m = line.match(/^([A-Da-dＡ-Ｄａ-ｄ])\s*[.、．)）:：]?\s*(.+)$/)
+    // 正文首字符不能是分隔符本身，否则「A.」这种半截行会被解析成
+    // 文本为「.」的选项，还不进 errors——UI 上就是个标着句点的按钮。
+    const m = line.match(/^([A-Da-dＡ-Ｄａ-ｄ])\s*[.、．)）:：]?\s*([^\s.、．)）:：].*)$/)
     if (m) out.push({ id: m[1].normalize('NFKC').toUpperCase(), 文本: m[2].trim() })
   }
   return out
@@ -93,6 +103,18 @@ function 解析尾段(raw) {
   return { state: parsed, errors }
 }
 
+function 找尾段标记(raw) {
+  let 命中 = -1
+  let from = 0
+  for (;;) {
+    const i = raw.indexOf(STATE_MARKER, from)
+    if (i === -1) break
+    if (i === 0 || raw[i - 1] === '\n') 命中 = i
+    from = i + STATE_MARKER.length
+  }
+  return 命中
+}
+
 // 解析一整回合的模型输出。约定：本函数永不抛异常，问题一律进 errors。
 export function parseTurn(raw) {
   const 结果 = { 标题: '', 剧情: '', 万象: [], 选项: [], state: null, errors: [] }
@@ -102,8 +124,9 @@ export function parseTurn(raw) {
     return 结果
   }
 
-  // 正文里可能出现 STATE 字样（人物对话引用），取最后一个才是真尾段
-  const idx = raw.lastIndexOf(STATE_MARKER)
+  // 真正的尾段标记按协议独占一行。只认行首出现的那个，
+  // 这样对话里引用的 <<<STATE>>> 和 JSON 字符串值里的 <<<STATE>>> 都不会切错位置。
+  const idx = 找尾段标记(raw)
   const 正文 = idx === -1 ? raw : raw.slice(0, idx)
   const 尾段 = idx === -1 ? null : raw.slice(idx + STATE_MARKER.length)
 
