@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { splitParagraphs, typewriterFrames, TYPE_CHARS_PER_FRAME } from '../src/ui/prose.js'
+import { splitParagraphs, createTypewriter, TYPE_CHARS_PER_FRAME } from '../src/ui/prose.js'
 
 test('按空行切段', () => {
   assert.deepEqual(splitParagraphs('甲\n\n乙\n\n丙'), ['甲', '乙', '丙'])
@@ -24,27 +24,67 @@ test('空输入给空数组而不是 [""]', () => {
   assert.deepEqual(splitParagraphs(null), [])
 })
 
-test('打字机逐帧推进，末帧等于全文', () => {
-  const 全文 = '陈岩用杖尖敲了敲碎石。'
-  const 帧 = typewriterFrames(全文)
-  assert.equal(帧[帧.length - 1], 全文)
-  assert.ok(帧.length > 1, '至少要有多帧才叫打字机')
-})
 
-test('打字机每帧只增不减，且严格递增', () => {
-  const 帧 = typewriterFrames('这是一段用来验证打字机推进的文字，足够长。')
+test('打字机匀速吐字，每帧只增不减', () => {
+  const tw = createTypewriter()
+  tw.push('陈岩用杖尖敲了敲碎石。')
+  const 帧 = []
+  let f
+  while ((f = tw.tick()) !== null) 帧.push(f)
+  assert.ok(帧.length > 1, '至少要有多帧才叫打字机')
+  assert.equal(帧[帧.length - 1], '陈岩用杖尖敲了敲碎石。')
   for (let i = 1; i < 帧.length; i++) {
-    assert.ok(帧[i].length > 帧[i - 1].length, `第 ${i} 帧没有推进`)
+    assert.ok(帧[i].length > 帧[i - 1].length, `第 ${i} 帧没推进`)
     assert.ok(帧[i].startsWith(帧[i - 1]), `第 ${i} 帧不是前一帧的延长`)
   }
 })
 
-test('帧数按每帧字数换算，不会一字一帧拖死长文', () => {
-  const 长文 = '啊'.repeat(600)
-  const 帧 = typewriterFrames(长文)
-  assert.equal(帧.length, Math.ceil(600 / TYPE_CHARS_PER_FRAME))
+test('每帧吐 TYPE_CHARS_PER_FRAME 个字', () => {
+  const tw = createTypewriter()
+  tw.push('啊'.repeat(30))
+  assert.equal(tw.tick().length, TYPE_CHARS_PER_FRAME)
+  assert.equal(tw.tick().length, TYPE_CHARS_PER_FRAME * 2)
 })
 
-test('空文本不产生帧', () => {
-  assert.deepEqual(typewriterFrames(''), [])
+test('流式续推：吐完了再来新内容，还能接着吐', () => {
+  const tw = createTypewriter()
+  tw.push('甲乙丙')
+  while (tw.tick() !== null) {}
+  assert.equal(tw.done(), true)
+  tw.push('丁戊己')
+  assert.equal(tw.done(), false, '来了新内容却认为吐完了')
+  let 末 = null
+  let f
+  while ((f = tw.tick()) !== null) 末 = f
+  assert.equal(末, '甲乙丙丁戊己')
+})
+
+test('网络一次来一大块也匀速吐，不会一次全糊上去', () => {
+  const tw = createTypewriter()
+  tw.push('啊'.repeat(50))
+  const 首帧 = tw.tick()
+  assert.ok(首帧.length < 50, `一次全吐了：${首帧.length} 字`)
+})
+
+test('flush 一次吐完，用于玩家点跳过', () => {
+  const tw = createTypewriter()
+  tw.push('甲乙丙丁戊己庚辛')
+  tw.tick()
+  assert.equal(tw.flush(), '甲乙丙丁戊己庚辛')
+  assert.equal(tw.done(), true)
+  assert.equal(tw.tick(), null)
+})
+
+test('没内容时 tick 返回 null 而不是空串', () => {
+  const tw = createTypewriter()
+  assert.equal(tw.tick(), null)
+  assert.equal(tw.done(), true)
+})
+
+test('push 非字符串不炸', () => {
+  const tw = createTypewriter()
+  tw.push(null)
+  tw.push(undefined)
+  tw.push(42)
+  assert.equal(tw.text(), '')
 })
