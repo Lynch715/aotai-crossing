@@ -1,12 +1,16 @@
 export const MAX_RETRY = 3
 
 // 只收录已验证可从浏览器直连（放开 CORS）的厂商。
+// 各家的模型名会过期，且过期后只报一句「模型不存在」，玩家看不出是我们的锅。
+// 默认一律选各家的「快而便宜」档——这游戏一局要发几十次请求，每次约 5K 输入。
+// 核对日期 2026-08，来源：api-docs.deepseek.com / openrouter.ai/deepseek
+// / platform.kimi.com/docs/models / docs.bigmodel.cn。改动前先去这些页面核一遍。
 export const PRESETS = [
-  { id: 'deepseek', 名称: 'DeepSeek', baseURL: 'https://api.deepseek.com/v1', 默认模型: 'deepseek-chat' },
-  { id: 'siliconflow', 名称: '硅基流动', baseURL: 'https://api.siliconflow.cn/v1', 默认模型: 'deepseek-ai/DeepSeek-V3' },
-  { id: 'moonshot', 名称: '月之暗面 Kimi', baseURL: 'https://api.moonshot.cn/v1', 默认模型: 'moonshot-v1-8k' },
+  { id: 'deepseek', 名称: 'DeepSeek', baseURL: 'https://api.deepseek.com/v1', 默认模型: 'deepseek-v4-flash' },
+  { id: 'siliconflow', 名称: '硅基流动', baseURL: 'https://api.siliconflow.cn/v1', 默认模型: 'deepseek-ai/DeepSeek-V4-Flash' },
+  { id: 'moonshot', 名称: '月之暗面 Kimi', baseURL: 'https://api.moonshot.cn/v1', 默认模型: 'kimi-k3' },
   { id: 'zhipu', 名称: '智谱', baseURL: 'https://open.bigmodel.cn/api/paas/v4', 默认模型: 'glm-4-plus' },
-  { id: 'openrouter', 名称: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1', 默认模型: 'deepseek/deepseek-chat' },
+  { id: 'openrouter', 名称: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1', 默认模型: 'deepseek/deepseek-v4-flash' },
 ]
 
 // 把各种失败归类。CORS 和 key 错误必须分开——两者的解决办法完全不同，

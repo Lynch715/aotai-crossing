@@ -24,6 +24,7 @@ export const MODULE_ORDER = [
   'src/llm/client.js',
   'src/turn.js',
   'src/ui/dom.js',
+  'src/ui/prose.js',
   'src/ui/router.js',
   'src/ui/save.js',
   'src/ui/config.js',
@@ -31,6 +32,8 @@ export const MODULE_ORDER = [
   'src/ui/screen-create.js',
   'src/ui/screen-draw.js',
   'src/ui/screen-shop.js',
+  'src/ui/screen-game.js',
+  'src/ui/screen-ending.js',
   'src/ui/app.js',
 ]
 

@@ -103,7 +103,7 @@ export function clampRequire(类型, require) {
 
 // 把 LLM 的 STATE 提议过一遍筛子。所有越权都记 warning，但不打断——游戏要能继续。
 export function validateProposal(state, proposal) {
-  const out = { 好感变更: [], 离队: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
+  const out = { 好感变更: [], 说话人: null, 离队: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return out
   // 「从不抛异常」得对 state 也成立，否则调用方传进半截状态时一样白屏。
   const 队伍 = Array.isArray(state?.party) ? state.party : []
@@ -125,6 +125,19 @@ export function validateProposal(state, proposal) {
       continue
     }
     out.好感变更.push({ npcId, delta: item.delta, 重大: item.重大 === true, 因: item.因 || '' })
+  }
+
+  // 说话人。立绘舞台靠它决定谁亮起——没有这个字段，舞台上永远没人说话，
+  // 「说话人高亮」这条设计就是死的。只认在队的人，认不出就留 null。
+  if (typeof proposal.说话人 === 'string' && proposal.说话人.trim()) {
+    const npcId = resolveNpc(proposal.说话人)
+    if (!npcId) {
+      out.warnings.push(`说话人认不出这个人：${proposal.说话人}`)
+    } else if (!队伍.some((p) => p.npcId === npcId && p.在队)) {
+      out.warnings.push(`说话人 ${proposal.说话人} 不在队伍里`)
+    } else {
+      out.说话人 = npcId
+    }
   }
 
   // 离队。没有这一段，模型只能在正文里叙述某人下撤，引擎永远不知道——

@@ -99,7 +99,7 @@ button.primary { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
   cursor: pointer;
   user-select: none;
 }
-.tag.on { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
+.tag.selected { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
 
 .item-row {
   display: flex;
@@ -110,7 +110,16 @@ button.primary { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
   border: 1px solid transparent;
   font-size: 12px;
 }
-.item-row.on { background: #16232b; border-color: #2f4a58; }
+.item-row.selected { background: #16232b; border-color: #2f4a58; }
+/* 选中项右侧打勾。此前 CSS 写 .on、代码写 .selected，类名对不上，
+   点了完全没反馈——捏人的性格/技能和商店三处全中。 */
+.item-row.selected .item-name::after {
+  content: '　✓';
+  color: var(--accent-bright);
+  font-weight: 700;
+}
+.tag { transition: background .12s, border-color .12s; }
+.tag:active { transform: scale(.94); }
 .item-row.blocked { opacity: .5; }
 
 .notice {
@@ -141,10 +150,277 @@ button.primary { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
   background: var(--bg-deep);
   border: 1px solid var(--line);
 }
-.portrait svg, .portrait .portrait-img {
+/* 按元素类选，不依赖容器叫 .portrait 还是 .stage-portrait——
+   此前写成 .portrait .portrait-img，舞台里的容器类不同，选择器没匹配上，
+   512x768 的图在 72x96 的框里按原尺寸渲染，只露出左上角一块透明背景，
+   看起来就是「空框」。 */
+.portrait-img,
+.portrait-svg {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
   object-position: top center;
+}
+
+/* ── 徒步主界面 ── */
+
+/* 顶栏：地点 / 时间 / 天气 横排 */
+.game-topbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 8px 0 14px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 14px;
+}
+.game-topbar .node-name { font-size: 15px; font-weight: 600; color: var(--text); }
+
+/* 双栏布局：左 200px 固定，右侧伸展 */
+.game-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.game-sidebar {
+  flex: none;
+  width: 200px;
+}
+.game-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 手机下改纵向堆叠 */
+@media (max-width: 640px) {
+  .game-layout { flex-direction: column; }
+  .game-sidebar { width: 100%; }
+}
+
+/* 左栏面板内部 */
+.game-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+.game-stat-label { color: var(--text-faint); }
+.game-stat-val   { color: var(--text); }
+.game-stat-val.warn   { color: var(--warn); }
+.game-stat-val.danger { color: var(--danger); }
+
+/* 进度条（薄版本） */
+.meter-bar {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width .25s ease;
+}
+.meter-bar.warn   { background: var(--warn); }
+.meter-bar.danger { background: var(--danger); }
+
+/* 背包物品 */
+.pack-item {
+  font-size: 11px;
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  color: var(--text-dim);
+}
+.pack-item.low { color: var(--warn); }
+
+/* 同行者列表 */
+.companion-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+}
+.companion-portrait {
+  width: 36px;
+  height: 48px;
+  flex: none;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+/* 立绘舞台：队友横排，说话人亮起 */
+.stage {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.stage-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  opacity: .45;
+  transition: opacity .2s;
+}
+.stage-figure.speaking { opacity: 1; }
+.stage-figure .stage-portrait {
+  width: 72px;
+  height: 96px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.stage-figure .stage-name {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* 剧情区 */
+.prose-area {
+  min-height: 120px;
+  margin-bottom: 14px;
+}
+.prose-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+/* 每段一个 <p>，不用 white-space:pre-wrap */
+.prose-area p {
+  margin: 0 0 8px;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+/* 万象（旁白提示）*/
+.event-notice {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 6px 10px;
+  background: var(--bg-raise);
+  border-left: 2px solid var(--accent);
+  border-radius: 2px;
+  margin-bottom: 6px;
+}
+
+/* 错误提示 */
+.error-notice {
+  font-size: 12px;
+  color: #c9a58f;
+  background: rgba(160,90,60,.1);
+  border: 1px solid #4a2e26;
+  border-radius: var(--radius);
+  padding: 8px 11px;
+  margin-bottom: 10px;
+}
+
+/* 选项 */
+.options-area {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.option {
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 13px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg-raise);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.option:hover:not(:disabled) { border-color: var(--accent); }
+.option.warn-option { border-color: var(--warn); }
+.option:disabled { opacity: .45; cursor: not-allowed; }
+.option-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 3px;
+}
+.option-meta.warn-meta { color: var(--warn); }
+
+/* 操作按钮行 */
+.game-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ── 结局页 ── */
+
+.ending-header {
+  margin-bottom: 20px;
+}
+.ending-type {
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.ending-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+.ending-desc {
+  color: var(--text-dim);
+  line-height: 1.75;
+  margin-bottom: 12px;
+}
+.ending-fine {
+  font-size: 13px;
+  color: var(--warn);
+  margin-bottom: 12px;
+}
+
+.recap-section {
+  margin-bottom: 20px;
+}
+.recap-section h2 {
+  font-size: 13px;
+  letter-spacing: .08em;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+}
+.recap-item {
+  font-size: 13px;
+  color: var(--text-dim);
+  padding: 3px 0;
+}
+.recap-peak {
+  color: var(--accent-bright);
+  font-weight: 600;
+}
+
+/* 等模型是全程最长的一段静默，点完到第一个字可能十几秒。
+   秒表要一直在走，玩家才知道是在等而不是死机。 */
+.thinking {
+  color: var(--accent-bright);
+  font-size: 13px;
+  padding: 10px 0 4px;
+  letter-spacing: .02em;
+}
+.thinking::before {
+  content: '';
+  display: inline-block;
+  width: 7px; height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  animation: thinking-pulse 1s ease-in-out infinite;
+}
+@keyframes thinking-pulse {
+  0%, 100% { opacity: .25; transform: scale(.8); }
+  50%      { opacity: 1;   transform: scale(1.15); }
 }

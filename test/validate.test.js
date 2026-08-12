@@ -261,3 +261,25 @@ test('空描述与非字符串不炸', () => {
   assert.equal(typeof weatherLevel(null), 'number')
   assert.equal(typeof weatherLevel(123), 'number')
 })
+
+test('说话人按名字解析成 id', () => {
+  const r = validateProposal(局面(), { 说话人: '陈岩' })
+  assert.equal(r.说话人, 'chenyan')
+})
+
+test('说话人认不出就留 null 并记 warning', () => {
+  const r = validateProposal(局面(), { 说话人: '张三丰' })
+  assert.equal(r.说话人, null)
+  assert.ok(r.warnings.some((w) => w.includes('张三丰')))
+})
+
+test('不在队的人不能当说话人', () => {
+  const s = 局面()
+  s.party.find((p) => p.npcId === 'chenyan').在队 = false
+  const r = validateProposal(s, { 说话人: '陈岩' })
+  assert.equal(r.说话人, null)
+})
+
+test('没有说话人字段时是 null 而不是 undefined', () => {
+  assert.equal(validateProposal(局面(), {}).说话人, null)
+})

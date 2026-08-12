@@ -4009,6 +4009,8 @@ export const MAX_RETRY = 3
 
 // 只收录已验证可从浏览器直连（放开 CORS）的厂商。
 export const PRESETS = [
+  // ⚠️ 下面这批模型名已过期（deepseek-chat 于 2026-07-24 下线）。
+  // 以 src/llm/client.js 的 PRESETS 为准，那里有核对日期与来源页面。
   { id: 'deepseek', 名称: 'DeepSeek', baseURL: 'https://api.deepseek.com/v1', 默认模型: 'deepseek-chat' },
   { id: 'siliconflow', 名称: '硅基流动', baseURL: 'https://api.siliconflow.cn/v1', 默认模型: 'deepseek-ai/DeepSeek-V3' },
   { id: 'moonshot', 名称: '月之暗面 Kimi', baseURL: 'https://api.moonshot.cn/v1', 默认模型: 'moonshot-v1-8k' },

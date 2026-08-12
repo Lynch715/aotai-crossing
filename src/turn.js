@@ -1,7 +1,7 @@
 import { snapshot, restore } from './engine/state.js'
 import { makeRng } from './engine/rng.js'
 import { judgeOption } from './engine/threshold.js'
-import { applyStepCost, advanceSlot, dailyUpkeep } from './engine/consume.js'
+import { applyStepCost, advanceSlot, dailyUpkeep, sleep } from './engine/consume.js'
 import { applyAffinityDelta } from './engine/affinity.js'
 import { npcLeaves } from './engine/party.js'
 import { checkEnding, applyEnding } from './engine/ending.js'
@@ -9,7 +9,7 @@ import { recordNode, recordEvent, addForeshadow, resolveForeshadow, compressJour
 import { getNode } from './data/route.js'
 import { buildSystemPrompt, buildUserMessage, buildRepairMessage } from './llm/prompt.js'
 import { parseTurn } from './llm/parser.js'
-import { validateProposal, clampRequire, clampCost, weatherLevel } from './llm/validate.js'
+import { validateProposal, clampRequire, clampCost, weatherLevel, isHarshWeather } from './llm/validate.js'
 import { streamChat } from './llm/client.js'
 
 export const MAX_REPAIR = 2
@@ -61,7 +61,14 @@ export async function runTurn({
 
     applyStepCost(state)
     advanceSlot(state)
-    if (state.clock.day !== 日前) dailyUpkeep(state)
+    if (state.clock.day !== 日前) {
+      // 跨天 = 过了一夜。睡眠是体力唯一的大额回复（+25），也是高山适应与
+      // 失温判定的唯一触发点——不在这里调 sleep()，三件事会同时失效：
+      // 体力只减不增、3400m 以上永远吃未适应惩罚、失温结局永远走不到。
+      // 恶劣与否一律按 weather.等级 判（≥6 即恶劣），不让调用方各猜各的。
+      sleep(state, { 恶劣天气: isHarshWeather(state.weather) })
+      dailyUpkeep(state)
+    }
 
     const 既成事实 = {
       选择: `${选中项.id} ${选中项.文本 || ''}`.trim(),
@@ -120,6 +127,7 @@ export async function runTurn({
     结果.warnings.push(...v.warnings)
 
     for (const c of v.好感变更) applyAffinityDelta(state, c.npcId, c.delta, { 重大: c.重大 })
+    结果.说话人 = v.说话人
     for (const 离 of v.离队) {
       npcLeaves(state, journal, 离.npcId, 离.因)
     }

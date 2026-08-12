@@ -1,5 +1,21 @@
+import { getNpc } from '../data/npcs.js'
+import { getGear } from '../data/gear.js'
+
 // 差距超过 10 即不可达。用一个远大于 10 的哨兵值表示「结构性缺失」（缺物品、人不在队）。
 export const UNREACHABLE = 999
+
+// 理由是直接摆到玩家眼前的，不能出现内部 id。
+// 「玩家能看懂自己为什么失败」是这套判定存在的前提——写成
+// 「linxiaoya 好感 62」就等于没写。
+function npcName(npcId) {
+  const n = getNpc(npcId)
+  return n ? n.名称 : npcId
+}
+
+function gearName(gearId) {
+  const g = getGear(gearId)
+  return g ? g.名称 : gearId
+}
 
 const 体力惩罚阈值 = 20
 const 体力惩罚差距 = 10
@@ -33,15 +49,15 @@ export function gapFor(require, state) {
     for (const [npcId, 需要] of Object.entries(require.好感 || {})) {
       const 同伴 = state.party.find((p) => p.npcId === npcId && p.在队)
       if (!同伴) {
-        bump(UNREACHABLE, `${npcId} 不在队`)
+        bump(UNREACHABLE, `${npcName(npcId)} 不在队`)
         continue
       }
       const d = 需要 - 同伴.好感
-      bump(d, `${npcId} 好感 ${同伴.好感}，需 ${需要}，差 ${d}`)
+      bump(d, `${npcName(npcId)} 好感 ${同伴.好感}，需 ${需要}，差 ${d}`)
     }
     for (const gearId of require.物品 || []) {
       if (!state.pack.some((p) => p.gearId === gearId)) {
-        bump(UNREACHABLE, `缺少 ${gearId}`)
+        bump(UNREACHABLE, `缺少${gearName(gearId)}`)
       }
     }
   }

@@ -325,16 +325,37 @@ export function splitParagraphs(文本) {
     .filter((段) => 段.length > 0)
 }
 
-// 打字机的帧序列。一字一帧会让 300 字的正文拖上十几秒，
-// 按每帧固定字数推进，长短文的节奏才一致。
-export function typewriterFrames(文本) {
-  if (typeof 文本 !== 'string' || !文本) return []
-  const 帧 = []
-  for (let i = TYPE_CHARS_PER_FRAME; i < 文本.length; i += TYPE_CHARS_PER_FRAME) {
-    帧.push(文本.slice(0, i))
+// 打字机队列。流式分块是忽快忽慢的——有时一次来 50 字，直接上屏会一顿一顿。
+// 这个队列把网络来的内容存起来，由渲染层按固定节奏匀速抽出，显示就稳了。
+//
+// 不做「拿完整文本切帧」那种设计：live 路径由 onDelta 驱动，而存档里不保存
+// 正文（packSave 只存 state 与 journal），根本没有重放这条路——那样的函数
+// 会没有调用方。这个项目已经出过三次「写了但没人调」了。
+export function createTypewriter(每帧字数 = TYPE_CHARS_PER_FRAME) {
+  let 缓冲 = ''
+  let 已出 = 0
+  return {
+    push(块) {
+      if (typeof 块 === 'string') 缓冲 += 块
+    },
+    // 抽一帧：返回本帧应显示的全文；没有新内容则返回 null，渲染层据此停表
+    tick() {
+      if (已出 >= 缓冲.length) return null
+      已出 = Math.min(缓冲.length, 已出 + 每帧字数)
+      return 缓冲.slice(0, 已出)
+    },
+    done() {
+      return 已出 >= 缓冲.length
+    },
+    // 玩家点「跳过」时一次吐完
+    flush() {
+      已出 = 缓冲.length
+      return 缓冲
+    },
+    text() {
+      return 缓冲
+    },
   }
-  帧.push(文本)
-  return 帧
 }
 ```
 
@@ -649,7 +670,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ### Task 4: 结局页
 
-三种结局（文档定死）：失败遇险、被救援、成功穿越（罚款 5000）。结局页要给出旅程回顾——走过的节点、关键事件、最终好感。
+**四种**结局：失败遇险、被救援、主动下撤、成功穿越（罚款 5000）。
+
+前三种由文档定死；`主动下撤` 是 `checkEnding` 实际会产出的第四种——走到核桃坪或嵩坪寺这两个源文档明写的备用下撤点就会触发。实测发现原设计漏了它，玩家在暴风雪里明智地撤退，换来的是**一片空白的结局页**。未知类型也必须兜底。结局页要给出旅程回顾——走过的节点、关键事件、最终好感。
 
 **Files:**
 - Create: `src/ui/screen-ending.js`
@@ -849,7 +872,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 - `APP出发` 末尾改为 `router.go('game')`，不再提示「计划三将接上」
 - `renderGame(router)`：读 `gameViewModel`，摆左栏、舞台、剧情、万象、选项
-- 点选项 → 调 `runTurn`，`onDelta` 里逐字上屏（用 `splitParagraphs` 分段，每段一个 `el('p')` + `setText`）
+- 点选项 → 调 `runTurn`。`onDelta` 只把分块 `push` 进 `createTypewriter()` 队列，**不直接上屏**；另起一个 30–50ms 的 `setInterval` 调 `tick()` 匀速吐字。网络分块忽快忽慢，直接上屏会一顿一顿。
+- 每次 `tick()` 拿到全文后用 `splitParagraphs` 重新分段渲染，每段一个 `el('p')` + `setText`。**全程不碰 innerHTML**
+- 提供「跳过」：调 `flush()` 一次吐完
 - 回合结束：刷新面板、写自动存档、若 `state.phase === '结局'` 则 `router.go('ending')`
 - 请求中禁用全部选项，避免连点发两次
 - 出错时把 `r.error.提示` 显示在剧情区上方，并保留重试按钮——**不消费玩家的选择**
@@ -916,6 +941,7 @@ Run: `AOTAI_KEY=你的key npm run smoke`，再换一家 `npm run smoke siliconfl
 | 数值一致性 | 面板上的体力/负重/好感与剧情叙述是否对得上 |
 | 降级 | 有没有触发过 STATE 解析失败；触发时正文是否保留、游戏是否卡死 |
 | 速度与成本 | 单回合首字延迟、总耗时；一局下来大致花了多少 token |
+| **时序错乱** | 玩家在「晚」行动，但状态快照给模型看的已是次日早。模型会不会把傍晚的事写成早上？这是 T1 评审提出的疑点，只有真模型能验 |
 
 - [ ] **Step 3: 按实测结果调 prompt**
 
