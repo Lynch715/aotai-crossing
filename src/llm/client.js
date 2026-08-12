@@ -6,8 +6,12 @@ export const MAX_RETRY = 3
 // 核对日期 2026-08，来源：api-docs.deepseek.com / openrouter.ai/deepseek
 // / platform.kimi.com/docs/models / docs.bigmodel.cn。改动前先去这些页面核一遍。
 export const PRESETS = [
-  { id: 'deepseek', 名称: 'DeepSeek', baseURL: 'https://api.deepseek.com/v1', 默认模型: 'deepseek-v4-flash' },
-  { id: 'siliconflow', 名称: '硅基流动', baseURL: 'https://api.siliconflow.cn/v1', 默认模型: 'deepseek-ai/DeepSeek-V4-Flash' },
+  // 额外参数：DeepSeek V4 默认开思考，而思考内容会吃光整个 max_tokens，
+  // 正文一个字都吐不出来（实测：思考 3113 字，finish_reason=length，输出为空）。
+  // 这游戏要的是文笔不是推理，一律关掉。
+  // 只给已验证支持的厂商发——有的 API 见到不认识的参数会直接 400。
+  { id: 'deepseek', 名称: 'DeepSeek', baseURL: 'https://api.deepseek.com/v1', 默认模型: 'deepseek-v4-flash', 额外参数: { thinking: { type: 'disabled' } } },
+  { id: 'siliconflow', 名称: '硅基流动', baseURL: 'https://api.siliconflow.cn/v1', 默认模型: 'deepseek-ai/DeepSeek-V4-Flash', 额外参数: { thinking: { type: 'disabled' } } },
   { id: 'moonshot', 名称: '月之暗面 Kimi', baseURL: 'https://api.moonshot.cn/v1', 默认模型: 'kimi-k3' },
   { id: 'zhipu', 名称: '智谱', baseURL: 'https://open.bigmodel.cn/api/paas/v4', 默认模型: 'glm-4-plus' },
   { id: 'openrouter', 名称: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1', 默认模型: 'deepseek/deepseek-v4-flash' },
@@ -114,7 +118,9 @@ export async function streamChat({
           messages,
           stream: true,
           temperature: config.temperature ?? 0.8,
-          max_tokens: config.maxTokens ?? 4096,
+          max_tokens: config.maxTokens ?? 8192,
+          ...(PRESETS.find((p) => p.id === config.presetId)?.额外参数 || {}),
+          ...(config.额外参数 || {}),
         }),
         signal,
       })

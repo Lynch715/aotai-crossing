@@ -2,7 +2,7 @@ import { PRESETS } from '../llm/client.js'
 
 export const CONFIG_KEY = 'aotai_config'
 
-const CONFIG_DEFAULTS = { presetId: 'deepseek', apiKey: '', baseURL: '', model: '', temperature: 0.8, maxTokens: 4096 }
+const CONFIG_DEFAULTS = { presetId: 'deepseek', apiKey: '', baseURL: '', model: '', temperature: 0.8, maxTokens: 8192 }
 
 export function normalizeConfig(raw = {}) {
   const c = { ...CONFIG_DEFAULTS, ...raw }

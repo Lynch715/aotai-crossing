@@ -250,3 +250,55 @@ test('正常结束时 finish 是 stop 而非 length', () => {
   const 帧 = 'data: ' + JSON.stringify({ choices: [{ delta: { content: '甲' }, finish_reason: 'stop' }] }) + '\n\n'
   assert.equal(feedSSE('', 帧).finish, 'stop')
 })
+
+// ══════════════════════════════════════════════════════════════
+// 这几条是拿一次真实失败换来的。
+//
+// 实测：DeepSeek V4 默认开思考，思考内容 3113 字把整个 max_tokens
+// 吃光，finish_reason=length，正文一个字都没吐出来 —— 界面上就是
+// 四个兜底选项加一片空白。
+// ══════════════════════════════════════════════════════════════
+
+test('DeepSeek 系预设必须携带关思考的参数', () => {
+  for (const id of ['deepseek', 'siliconflow']) {
+    const p = PRESETS.find((x) => x.id === id)
+    assert.deepEqual(p.额外参数, { thinking: { type: 'disabled' } },
+      `${p.名称} 没关思考——思考会吃光 max_tokens，正文吐不出来`)
+  }
+})
+
+test('没验证过的厂商不发额外参数——乱发会被 400 拒掉', () => {
+  for (const id of ['moonshot', 'zhipu', 'openrouter']) {
+    assert.equal(PRESETS.find((x) => x.id === id).额外参数, undefined,
+      `${id} 发了未验证的参数，可能直接 400`)
+  }
+})
+
+test('请求体真的带上了预设的额外参数', async () => {
+  let 体 = null
+  await streamChat({
+    config: { presetId: 'deepseek', baseURL: 'https://x/v1', apiKey: 'k', model: 'm' },
+    messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: async (url, opt) => {
+      体 = JSON.parse(opt.body)
+      return { ok: true, status: 200, body: { getReader: () => ({ read: async () => ({ done: true }), releaseLock: () => {} }) } }
+    },
+    sleepImpl: async () => {},
+  })
+  assert.deepEqual(体.thinking, { type: 'disabled' }, '关思考参数没进请求体')
+  assert.equal(体.max_tokens, 8192, `预算不对：${体.max_tokens}`)
+})
+
+test('调用方的额外参数可以覆盖预设的', async () => {
+  let 体 = null
+  await streamChat({
+    config: { presetId: 'deepseek', baseURL: 'https://x/v1', apiKey: 'k', model: 'm', 额外参数: { thinking: { type: 'enabled' } } },
+    messages: [{ role: 'user', content: 'hi' }],
+    fetchImpl: async (url, opt) => {
+      体 = JSON.parse(opt.body)
+      return { ok: true, status: 200, body: { getReader: () => ({ read: async () => ({ done: true }), releaseLock: () => {} }) } }
+    },
+    sleepImpl: async () => {},
+  })
+  assert.deepEqual(体.thinking, { type: 'enabled' })
+})
