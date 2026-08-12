@@ -531,11 +531,10 @@ import { removeItem, hasItem } from './state.js'
 import { getGear } from '../data/gear.js'
 ```
 
-在 `const 需要适应晚数 = 1` 下方追加常量：
+在 `const 需要适应晚数 = 1` 下方追加常量（**不要加 `失温连败上限`——`ending.js` 已有同名常量，拼接后会撞车**）：
 
 ```js
 const 毫无保暖 = 99
-const 失温连败上限 = 3
 ```
 
 在 `isAcclimatized` 之后插入：
