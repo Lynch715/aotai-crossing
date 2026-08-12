@@ -2359,11 +2359,12 @@ test('失败遇险优先于被救援', () => {
 })
 
 test('applyEnding 写入 phase 与结局，并对成功穿越扣罚款', () => {
-  const s = 状态({ place: { nodeId: 'xiabansi', 海拔: 2800 } })
+  // 钱要多于罚款才看得出扣款；基础夹具的 4320 不够扣，会被下限夹成 0
+  const s = 状态({ place: { nodeId: 'xiabansi', 海拔: 2800 }, money: 8000 })
   applyEnding(s, checkEnding(s))
   assert.equal(s.phase, '结局')
   assert.equal(s.ending.type, '成功穿越')
-  assert.equal(s.money, 4320 - FINE_AMOUNT)
+  assert.equal(s.money, 8000 - FINE_AMOUNT)
 })
 
 test('罚款不会把钱扣成负数', () => {
