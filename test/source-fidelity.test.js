@@ -29,9 +29,12 @@ const 允许不在源文档中 = new Map([
   ['讲义气，见不得人吃亏', 'PERSONALITY_TAGS 自造'],
   ['只信数据和装备', 'PERSONALITY_TAGS 自造'],
   ['为风景可以吃苦', 'PERSONALITY_TAGS 自造'],
+  // gearWarnings 采购警告文案，是游戏 UI 逻辑自造，不是从源文档表格抄录的
+  ['未携带任何求救设备（GPS信标或卫星电话）——失联后无法主动求救。', 'gearWarnings UI警告自造'],
+  ['夏季蚊虫叮咬频繁，未带防蚊液。', 'gearWarnings UI警告自造'],
 ])
 
-const 受检模块 = ['src/data/route.js', 'src/data/npcs.js']
+const 受检模块 = ['src/data/route.js', 'src/data/npcs.js', 'src/data/seasons.js']
 
 // 去掉注释，只看代码里的字符串字面量——注释是给人看的，不必逐字对源文档
 function 剥注释(源码) {

@@ -9,6 +9,7 @@ export const MODULE_ORDER = [
   'src/data/route.js',
   'src/data/npcs.js',
   'src/data/gear.js',
+  'src/data/seasons.js',
   'src/engine/rng.js',
 ]
 
