@@ -2,7 +2,7 @@
 // 这一层只做渲染——读视图模型、写 DOM。判断逻辑全在视图模型里。
 // 铁律：动态数据绝不拼进 innerHTML。（见 test/dom.test.js 的护栏）
 
-import { el, setText, clear, $ } from './dom.js'
+import { el, setText, clear } from './dom.js'
 import { createRouter } from './router.js'
 import { loadConfig, saveConfig, configViewModel } from './config.js'
 import { createViewModel, randomDraft, deriveExperience } from './screen-create.js'
