@@ -20,6 +20,7 @@ export const MODULE_ORDER = [
   'src/llm/parser.js',
   'src/llm/validate.js',
   'src/llm/prompt.js',
+  'src/llm/client.js',
 ]
 
 // 只删真正的 import 语句（必须有 from 子句或裸副作用导入），
