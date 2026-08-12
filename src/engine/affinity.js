@@ -18,14 +18,19 @@ export function clampAffinity(v) {
 }
 
 export function affinityLabel(v) {
-  const hit = 分级.find(([lo, hi]) => v >= lo && v <= hi)
+  // 先夹取再查表。否则 affinityLabel(150) 会落空并回落成「冷淡」——
+  // 一个静默的谎言，而它恰恰出现在 UI 上给玩家看。
+  const 夹取后 = clampAffinity(v)
+  const hit = 分级.find(([lo, hi]) => 夹取后 >= lo && 夹取后 <= hi)
   return hit ? hit[2] : '冷淡'
 }
 
 // LLM 只能提议好感变化，落地前先夹到允许幅度——防止一句话涨 40 点。
 export function applyAffinityDelta(state, npcId, delta, { 重大 = false } = {}) {
   const 同伴 = state.party.find((p) => p.npcId === npcId && p.在队)
-  if (!同伴) return { 应用: false, 实际: 0, 被夹取: false }
+  // 两个分支返回同样的键。少给 前值/后值 的话，调用方一解构就静默拿到
+  // undefined，拿去比阈值或做算术会悄悄算错。
+  if (!同伴) return { 应用: false, 实际: 0, 被夹取: false, 前值: null, 后值: null }
 
   const 上限 = 重大 ? MAX_MAJOR_DELTA : MAX_DELTA
   const 实际 = Math.max(-上限, Math.min(上限, delta))

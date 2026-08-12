@@ -541,7 +541,7 @@ export function isAdjacent(fromId, toId) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/route.test.js`
-Expected: PASS，11 个测试全绿
+Expected: PASS，13 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序**
 
@@ -1194,7 +1194,7 @@ export function gearWarnings(seasonId, ownedIds) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/seasons.test.js`
-Expected: PASS，11 个测试全绿
+Expected: PASS，13 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序**
 
@@ -2217,14 +2217,19 @@ export function clampAffinity(v) {
 }
 
 export function affinityLabel(v) {
-  const hit = 分级.find(([lo, hi]) => v >= lo && v <= hi)
+  // 先夹取再查表。否则 affinityLabel(150) 会落空并回落成「冷淡」——
+  // 一个静默的谎言，而它恰恰出现在 UI 上给玩家看。
+  const 夹取后 = clampAffinity(v)
+  const hit = 分级.find(([lo, hi]) => 夹取后 >= lo && 夹取后 <= hi)
   return hit ? hit[2] : '冷淡'
 }
 
 // LLM 只能提议好感变化，落地前先夹到允许幅度——防止一句话涨 40 点。
 export function applyAffinityDelta(state, npcId, delta, { 重大 = false } = {}) {
   const 同伴 = state.party.find((p) => p.npcId === npcId && p.在队)
-  if (!同伴) return { 应用: false, 实际: 0, 被夹取: false }
+  // 两个分支返回同样的键。少给 前值/后值 的话，调用方一解构就静默拿到
+  // undefined，拿去比阈值或做算术会悄悄算错。
+  if (!同伴) return { 应用: false, 实际: 0, 被夹取: false, 前值: null, 后值: null }
 
   const 上限 = 重大 ? MAX_MAJOR_DELTA : MAX_DELTA
   const 实际 = Math.max(-上限, Math.min(上限, delta))
@@ -2254,7 +2259,7 @@ export function initialAffinity(tagId, npcId) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/affinity.test.js`
-Expected: PASS，11 个测试全绿。「性格越合拍初始好感越高」里的 37 与 17 是按 Task 4 的轴值手算的，对不上说明轴值抄错——回 `npcs.js` 核对，别改断言。
+Expected: PASS，13 个测试全绿。「性格越合拍初始好感越高」里的 37 与 17 是按 Task 4 的轴值手算的，对不上说明轴值抄错——回 `npcs.js` 核对，别改断言。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -3673,7 +3678,7 @@ ${已生成正文}
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/prompt.test.js`
-Expected: PASS，11 个测试全绿。「快照泄漏了数字好感」那条是硬约束——`buildUserMessage` 里绝不能出现 `p.好感`。
+Expected: PASS，13 个测试全绿。「快照泄漏了数字好感」那条是硬约束——`buildUserMessage` 里绝不能出现 `p.好感`。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 

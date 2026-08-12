@@ -77,6 +77,19 @@ test('对不在队的人不生效', () => {
   assert.equal(s.party[0].好感, 62)
 })
 
+test('分级标签先夹取再查表，越界值不会静默变成冷淡', () => {
+  assert.equal(affinityLabel(150), '至死不渝')
+  assert.equal(affinityLabel(-5), '冷淡')
+})
+
+test('应用失败时返回同样的键，不让调用方静默拿到 undefined', () => {
+  const s = 队伍()
+  const 失败 = applyAffinityDelta(s, 'wangdapeng', 5)
+  const 成功 = applyAffinityDelta(s, 'linxiaoya', 1)
+  assert.deepEqual(Object.keys(失败).sort(), Object.keys(成功).sort())
+  assert.equal(失败.后值, null)
+})
+
 test('初始好感落在 10-45', () => {
   for (const tag of ['renside', 'zilaishu', 'maoxian', 'dulai']) {
     for (const npc of ['chenyan', 'hanmei', 'liweiwei', 'zhaozhiguo']) {
