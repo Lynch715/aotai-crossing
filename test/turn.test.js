@@ -372,3 +372,82 @@ test('长天气描述先解析等级再截断，关键词不会被切掉', async
   assert.equal(s.weather.等级, 9, `等级被静默降级：${s.weather.等级}`)
   assert.ok(s.weather.状态.length <= 40, '显示文本仍应截断')
 })
+
+test('跨到第二天会睡一觉：回体力、累计高山适应', async () => {
+  const s = 局面()
+  s.clock = { day: 4, slot: '晚' }
+  s.place = { nodeId: 'shuiwozi', 海拔: 3100 }
+  s.pc.体力 = 40
+  s.flags.高海拔过夜数 = 0
+  s.pack.push({ gearId: 'tent', 档: '主流', 数量: 1, 单重: 2.4, 余量: 100 })
+  s.pack.push({ gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 })
+
+  await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({ text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{}' }),
+  })
+
+  assert.equal(s.clock.day, 5, '应已跨天')
+  assert.equal(s.flags.高海拔过夜数, 1, '3100m 营地过夜没累计适应')
+  // 走一段扣体力，睡一觉回 25，净值应高于走完那一刻
+  assert.ok(s.pc.体力 > 40 - 15, `睡眠没回体力：${s.pc.体力}`)
+})
+
+test('同一天内推进时段不会睡觉', async () => {
+  const s = 局面()
+  s.clock = { day: 4, slot: '早' }
+  s.flags.高海拔过夜数 = 0
+  await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({ text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{}' }),
+  })
+  assert.equal(s.clock.slot, '中')
+  assert.equal(s.flags.高海拔过夜数, 0, '没跨天却睡了')
+})
+
+test('恶劣天气按 weather.等级 判定，不靠调用方瞎猜', async () => {
+  const 造 = (等级) => {
+    const s = 局面()
+    s.clock = { day: 4, slot: '晚' }
+    s.place = { nodeId: 'shuiwozi', 海拔: 3100 }
+    s.pc.体力 = 30
+    s.weather = { 状态: 'x', 等级 }
+    s.pack.push({ gearId: 'tent', 档: '主流', 数量: 1, 单重: 2.4, 余量: 100 })
+    s.pack.push({ gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 })
+    return s
+  }
+  const 跑 = async (s) => {
+    await runTurn({
+      state: s, journal: createJournal(),
+      选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+      config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+      streamImpl: async () => ({ text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{}' }),
+    })
+    return s.pc.体力
+  }
+  const 好天 = await 跑(造(2))
+  const 恶劣 = await 跑(造(8))
+  assert.ok(好天 > 恶劣, `恶劣天气(${恶劣}) 应比好天(${好天}) 回得少`)
+})
+
+test('冬季连续三夜没睡袋，主循环里真的走到失败遇险', async () => {
+  const s = 局面()
+  s.meta.季节 = '冬季'
+  s.place = { nodeId: 'shuiwozi', 海拔: 3100 }
+  s.pc.体力 = 100
+  for (let i = 0; i < 3; i++) {
+    s.clock = { day: 4 + i, slot: '晚' }
+    await runTurn({
+      state: s, journal: createJournal(),
+      选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+      config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+      streamImpl: async () => ({ text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{}' }),
+    })
+  }
+  assert.equal(s.flags.失温连败, 3)
+  assert.equal(s.phase, '结局', '三夜失温却没进结局')
+})
