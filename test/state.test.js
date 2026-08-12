@@ -90,7 +90,8 @@ test('写入层拒收脏数量与脏百分比', () => {
   const s = 基础状态()
   const 原重 = s.carry.当前
 
-  for (const 坏值 of [0, -1, NaN, Infinity, undefined]) {
+  // 不含 undefined：它会触发默认参数 数量 = 1，那是有意的
+  for (const 坏值 of [0, -1, NaN, Infinity, '三个', null]) {
     assert.equal(addItem(s, 'ibuprofen', '基础', 坏值), false, `addItem 收下了 ${坏值}`)
     assert.equal(removeItem(s, 'staple_food', 坏值), false, `removeItem 收下了 ${坏值}`)
   }
