@@ -102,6 +102,30 @@ test('快照与回滚是深拷贝，互不影响', () => {
   assert.equal(restore(snap).pc.体力, 100)
 })
 
+test('addItem 换档时同步更新档次与单重，不留旧值', () => {
+  const s = 基础状态()
+  // 基础状态里 backpack 是主流 2.1kg，经济档是 2.5kg
+  addItem(s, 'backpack', '经济', 1)
+  const 包 = s.pack.find((p) => p.gearId === 'backpack')
+  assert.equal(包.档, '经济')
+  assert.equal(包.单重, 2.5)
+  assert.equal(包.数量, 2)
+  // 2×2.5 + 干粮 2.0 = 7.0；若单重停留在旧档会算成 6.2
+  assert.equal(s.carry.当前, 7)
+})
+
+test('起点不是合法节点时报出可读的错，而不是裸 TypeError', () => {
+  assert.throws(
+    () =>
+      createInitialState({
+        种子: 1, 季节: '秋季', 起点: '不存在的地方',
+        pc: { 名字: '甲', 职业: '乙', 年龄: 30, 性别: '男', 性格: 'renside', 外貌: '丙', 技能: [], 户外经验: 10 },
+        队友: [], 背包: [], 金钱: 100,
+      }),
+    /起点不是合法节点/
+  )
+})
+
 test('recalcCarry 幂等', () => {
   const s = 基础状态()
   recalcCarry(s)

@@ -1383,7 +1383,9 @@ export function createInitialState(opts) {
     flags: { 已求救: false, 已下撤: false, 高海拔过夜数: 0, 失温连败: 0, 触发过的事件id: [] },
   }
 
-  state.place.海拔 = getNode(state.place.nodeId).海拔
+  const 起点节点 = getNode(state.place.nodeId)
+  if (!起点节点) throw new Error(`createInitialState: 起点不是合法节点 id：${state.place.nodeId}`)
+  state.place.海拔 = 起点节点.海拔
 
   for (const item of opts.背包 || []) {
     addItem(state, item.gearId, item.档, item.数量)
@@ -1403,7 +1405,11 @@ export function addItem(state, gearId, 档, 数量 = 1) {
   if (!tier) return false
   const 已有 = state.pack.find((p) => p.gearId === gearId)
   if (已有) {
+    // 换档要同步替换整摞的档次与单重。只加数量不改单重的话，负重会按旧档
+    // 算出错值且无人察觉——而「数值不飘」正是这整套架构存在的理由。
     已有.数量 += 数量
+    已有.档 = 档
+    已有.单重 = tier.重量
   } else {
     state.pack.push({ gearId, 档, 数量, 单重: tier.重量, 余量: 100 })
   }
@@ -1446,7 +1452,7 @@ export function restore(snap) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/state.test.js`
-Expected: PASS，11 个测试全绿
+Expected: PASS，13 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
