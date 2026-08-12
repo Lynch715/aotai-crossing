@@ -18,6 +18,7 @@ export const MODULE_ORDER = [
   'src/engine/ending.js',
   'src/engine/journal.js',
   'src/llm/parser.js',
+  'src/llm/validate.js',
 ]
 
 // 只删真正的 import 语句（必须有 from 子句或裸副作用导入），

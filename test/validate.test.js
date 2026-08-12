@@ -1,0 +1,142 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { resolveNpc, clampRequire, validateProposal, CLAMP_TABLE } from '../src/llm/validate.js'
+
+function 状态() {
+  return {
+    place: { nodeId: 'maijieling', 海拔: 3500 },
+    party: [
+      { npcId: 'linxiaoya', 好感: 62, 在队: true },
+      { npcId: 'chenyan', 好感: 45, 在队: true },
+    ],
+    pack: [{ gearId: 'rope', 数量: 1, 单重: 1.6 }],
+  }
+}
+
+test('人物中文名映射回 id', () => {
+  assert.equal(resolveNpc('林晓雅'), 'linxiaoya')
+  assert.equal(resolveNpc('陈岩'), 'chenyan')
+  assert.equal(resolveNpc('linxiaoya'), 'linxiaoya', 'id 原样传入也认')
+  assert.equal(resolveNpc('查无此人'), null)
+  assert.equal(resolveNpc(''), null)
+  assert.equal(resolveNpc(null), null)
+})
+
+test('社交类经验门槛夹到 0-30', () => {
+  const { require: r, warnings } = clampRequire('社交', { 经验: 80 })
+  assert.equal(r.经验, CLAMP_TABLE.社交.经验[1])
+  assert.equal(r.经验, 30)
+  assert.equal(warnings.length, 1)
+})
+
+test('徒步类经验门槛低于下限时抬到下限', () => {
+  assert.equal(clampRequire('徒步', { 经验: 5 }).require.经验, 20)
+})
+
+test('高危类好感门槛夹到 70', () => {
+  const { require: r } = clampRequire('高危', { 好感: { linxiaoya: 95 } })
+  assert.equal(r.好感.linxiaoya, 70)
+})
+
+test('门槛在范围内时原样保留，不产生 warning', () => {
+  const { require: r, warnings } = clampRequire('徒步', { 经验: 60, 好感: { linxiaoya: 50 } })
+  assert.equal(r.经验, 60)
+  assert.equal(r.好感.linxiaoya, 50)
+  assert.deepEqual(warnings, [])
+})
+
+test('未知类型按徒步处理', () => {
+  assert.equal(clampRequire('胡编的类型', { 经验: 99 }).require.经验, 75)
+})
+
+test('好感提议：名字映射、幅度交由引擎夹取', () => {
+  const p = { 好感: [{ npc: '林晓雅', delta: 3, 因: '你退后让她先过' }] }
+  const r = validateProposal(状态(), p)
+  assert.equal(r.好感变更.length, 1)
+  assert.equal(r.好感变更[0].npcId, 'linxiaoya')
+  assert.equal(r.好感变更[0].delta, 3)
+  assert.equal(r.好感变更[0].重大, false)
+})
+
+test('带重大标记的好感提议被识别', () => {
+  const p = { 好感: [{ npc: '陈岩', delta: 15, 重大: true, 因: '他把你从石缝里拽了上来' }] }
+  assert.equal(validateProposal(状态(), p).好感变更[0].重大, true)
+})
+
+test('对不在队/不存在的人的好感提议被驳回', () => {
+  const p = { 好感: [{ npc: '王大鹏', delta: 5 }, { npc: '孙悟空', delta: 5 }] }
+  const r = validateProposal(状态(), p)
+  assert.equal(r.好感变更.length, 0)
+  assert.equal(r.warnings.length, 2)
+})
+
+test('delta 非数字被驳回', () => {
+  const r = validateProposal(状态(), { 好感: [{ npc: '林晓雅', delta: '很多' }] })
+  assert.equal(r.好感变更.length, 0)
+  assert.ok(r.warnings[0].includes('delta'))
+})
+
+test('选项里引用不存在的物品被驳回，其余照常', () => {
+  const p = { 选项: [
+    { id: 'A', 类型: '徒步', require: { 物品: ['rope'] }, cost: { 体力: 10 } },
+    { id: 'B', 类型: '徒步', require: { 物品: ['光剑'] }, cost: { 体力: 10 } },
+  ] }
+  const r = validateProposal(状态(), p)
+  assert.equal(r.选项.length, 2)
+  assert.deepEqual(r.选项[0].require.物品, ['rope'])
+  assert.deepEqual(r.选项[1].require.物品, [], '不存在的物品应被剔除')
+  assert.ok(r.warnings.some((w) => w.includes('光剑')))
+})
+
+test('选项 id 非法被丢弃', () => {
+  const r = validateProposal(状态(), { 选项: [{ id: 'X', 类型: '社交' }, { id: 'A', 类型: '社交' }] })
+  assert.equal(r.选项.length, 1)
+  assert.equal(r.选项[0].id, 'A')
+})
+
+test('选项好感门槛的人名同样被映射', () => {
+  const p = { 选项: [{ id: 'A', 类型: '社交', require: { 好感: { 林晓雅: 40 } } }] }
+  const r = validateProposal(状态(), p)
+  assert.equal(r.选项[0].require.好感.linxiaoya, 40)
+})
+
+test('去向必须是合法相邻节点', () => {
+  assert.equal(validateProposal(状态(), { 去向建议: '水窝子营地' }).去向, 'shuiwozi')
+  assert.equal(validateProposal(状态(), { 去向建议: 'shuiwozi' }).去向, 'shuiwozi')
+  assert.equal(validateProposal(状态(), { 去向建议: '下板寺' }).去向, null, '隔着大半条线不该允许')
+  assert.equal(validateProposal(状态(), { 去向建议: '珠穆朗玛' }).去向, null)
+})
+
+test('去向不合法时记 warning', () => {
+  const r = validateProposal(状态(), { 去向建议: '下板寺' })
+  assert.ok(r.warnings.some((w) => w.includes('去向')))
+})
+
+test('记忆与伏笔原样透传，空白项被剔除', () => {
+  const p = { 记忆: ['D4晚 麦秸岭 判定失败', '  ', ''], 伏笔: { 新增: ['雾里的人影'], 已收: ['石缝路标带'] } }
+  const r = validateProposal(状态(), p)
+  assert.deepEqual(r.记忆, ['D4晚 麦秸岭 判定失败'])
+  assert.deepEqual(r.伏笔.新增, ['雾里的人影'])
+  assert.deepEqual(r.伏笔.已收, ['石缝路标带'])
+})
+
+test('空提议或 null 提议返回空结构，不炸', () => {
+  for (const p of [null, undefined, {}, 42, []]) {
+    const r = validateProposal(状态(), p)
+    assert.deepEqual(r.好感变更, [])
+    assert.deepEqual(r.选项, [])
+    assert.equal(r.去向, null)
+  }
+})
+
+test('validateProposal 从不抛异常', () => {
+  const 恶意 = [
+    { 好感: '不是数组' },
+    { 选项: [null, undefined, 42] },
+    { 伏笔: '不是对象' },
+    { 选项: [{ id: 'A', require: { 好感: '不是对象' } }] },
+  ]
+  for (const p of 恶意) {
+    assert.doesNotThrow(() => validateProposal(状态(), p), JSON.stringify(p))
+  }
+})
