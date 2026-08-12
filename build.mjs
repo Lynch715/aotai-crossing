@@ -24,6 +24,7 @@ export const MODULE_ORDER = [
   'src/llm/client.js',
   'src/turn.js',
   'src/ui/dom.js',
+  'src/ui/prose.js',
   'src/ui/router.js',
   'src/ui/save.js',
   'src/ui/config.js',
