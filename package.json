@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "test": "node --test",
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "smoke": "node smoke.mjs"
   }
 }
