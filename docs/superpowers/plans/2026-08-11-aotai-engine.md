@@ -1611,11 +1611,11 @@ export function successChance(gap) {
 
 // 算出「离达标还差多少」。多条门槛取最大差距——最短板决定成败。
 export function gapFor(require, state) {
-  const reasons = []
+  const 未达 = []
   let gap = 0
   const bump = (d, why) => {
     if (d > 0) {
-      reasons.push(why)
+      未达.push({ d, why })
       if (d > gap) gap = d
     }
   }
@@ -1648,10 +1648,18 @@ export function gapFor(require, state) {
   // 体力见底时百事艰难：所有判定统一加码，不区分门槛类型。
   if (gap < UNREACHABLE && state.pc.体力 < 体力惩罚阈值) {
     gap += 体力惩罚差距
-    reasons.push(`体力 ${state.pc.体力} 低于 ${体力惩罚阈值}，判定额外加 ${体力惩罚差距} 点难度`)
+    未达.push({ d: 体力惩罚差距, why: `体力 ${state.pc.体力} 低于 ${体力惩罚阈值}，判定额外加 ${体力惩罚差距} 点难度` })
   }
 
-  return { gap, reasons }
+  // 数值门槛可能报得离谱（LLM 写了个「需经验 5000」），算出的差距会远超哨兵值。
+  // 一律收敛到 UNREACHABLE，否则下游用 gap === UNREACHABLE 判结构性不可达时会漏掉。
+  if (gap > UNREACHABLE) gap = UNREACHABLE
+
+  // 按差距从大到小排：reasons[0] 恒为真正卡住玩家的那一条。
+  // 「玩家能看懂自己为什么失败」是这套判定存在的前提，UI 要显示的就是它。
+  未达.sort((a, b) => b.d - a.d)
+
+  return { gap, reasons: 未达.map((r) => r.why) }
 }
 
 // 判定在调用 LLM 之前完成。返回值直接决定要告诉 LLM 的「既成事实」。
@@ -1677,7 +1685,7 @@ export function judgeOption(option, state, rng) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/threshold.test.js`
-Expected: PASS，13 个测试全绿。最后一条统计测试若偶发失败，检查 `judgeOption` 是否对每次调用都新建了 rng——测试里是故意每轮换种子的。
+Expected: PASS，15 个测试全绿。最后一条统计测试若偶发失败，检查 `judgeOption` 是否对每次调用都新建了 rng——测试里是故意每轮换种子的。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 

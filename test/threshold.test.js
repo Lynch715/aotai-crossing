@@ -65,6 +65,23 @@ test('空门槛视为无条件通过', () => {
   assert.equal(gapFor(undefined, 状态()).gap, 0)
 })
 
+test('reasons[0] 恒为卡住玩家的那一条，不是先算到的那一条', () => {
+  // 经验差 7、体力差 20 → 卡住的是体力，UI 要先显示它
+  const { gap, reasons } = gapFor({ 经验: 45, 体力: 70 }, 状态())
+  assert.equal(gap, 20)
+  assert.ok(reasons[0].includes('体力'), `首条应为体力，实为：${reasons[0]}`)
+  assert.ok(reasons[0].includes('20'))
+  assert.ok(reasons[1].includes('户外经验'))
+})
+
+test('离谱的数值门槛收敛到 UNREACHABLE，不会溢出哨兵值', () => {
+  // LLM 若报出「需经验 5000」，差距原本会算成 4962，
+  // 下游用 gap === UNREACHABLE 判结构性不可达就会漏掉
+  const { gap } = gapFor({ 经验: 5000 }, 状态())
+  assert.equal(gap, UNREACHABLE)
+  assert.equal(successChance(gap), 0)
+})
+
 test('judgeOption：达标必成，不掷骰', () => {
   const r = judgeOption({ require: { 经验: 30 } }, 状态(), makeRng(1))
   assert.equal(r.outcome, 'success')
