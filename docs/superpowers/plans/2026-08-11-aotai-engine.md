@@ -4114,7 +4114,9 @@ export async function streamChat({
     } catch (err) {
       const info = classifyError(err, null)
       最后错误 = 造错误(info)
-      if (!info.可重试) throw 最后错误
+      // 玩家主动取消也走 AbortError，和超时长得一样。信号已经 aborted 就别重试了——
+      // 人都走了还退避重试三次，纯属替玩家烧 token。
+      if (!info.可重试 || signal?.aborted) throw 最后错误
       await sleepImpl(backoffDelay(attempt))
       continue
     }
@@ -4122,7 +4124,7 @@ export async function streamChat({
     if (!response.ok) {
       const info = classifyError(null, response)
       最后错误 = 造错误(info)
-      if (!info.可重试) throw 最后错误
+      if (!info.可重试 || signal?.aborted) throw 最后错误
       await sleepImpl(backoffDelay(attempt))
       continue
     }

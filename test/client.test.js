@@ -191,3 +191,25 @@ test('缺 apiKey 时直接报错，不发请求', async () => {
   )
   assert.equal(发了, false)
 })
+
+test('玩家主动取消后不再重试，不替他烧 token', async () => {
+  const ctrl = new AbortController()
+  let 调用次数 = 0
+  const fake = async () => {
+    调用次数++
+    ctrl.abort()
+    const e = new Error('aborted')
+    e.name = 'AbortError'
+    throw e
+  }
+  await assert.rejects(() =>
+    streamChat({
+      config: { baseURL: 'https://x/v1', apiKey: 'k', model: 'm' },
+      messages: [{ role: 'user', content: 'hi' }],
+      fetchImpl: fake,
+      sleepImpl: async () => {},
+      signal: ctrl.signal,
+    })
+  )
+  assert.equal(调用次数, 1, `取消后仍重试了 ${调用次数} 次`)
+})
