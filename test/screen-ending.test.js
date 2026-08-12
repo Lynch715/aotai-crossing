@@ -73,3 +73,33 @@ test('没有结局时返回 null，而不是编一个出来', () => {
   s.ending = null
   assert.equal(endingViewModel(s, j), null)
 })
+
+test('主动下撤有自己的文案，不能白屏', () => {
+  const { s, j } = 收场('主动下撤')
+  const vm = endingViewModel(s, j)
+  assert.ok(vm, '主动下撤返回了 null —— 玩家会看到空白结局页')
+  assert.equal(vm.定性, '生还')
+  assert.equal(vm.罚款, 0)
+  assert.ok(vm.标题.length > 0)
+})
+
+test('未知结局类型也给页面，不留白屏', () => {
+  const { s, j } = 收场('将来才有的新结局')
+  const vm = endingViewModel(s, j)
+  assert.ok(vm, '未知类型返回了 null')
+  assert.ok(vm.标题.length > 0)
+})
+
+test('回顾给出走到过的最高点', () => {
+  const { s, j } = 收场('成功穿越')
+  const vm = endingViewModel(s, j)
+  assert.ok(vm.回顾.最高点, '缺最高点')
+  assert.equal(vm.回顾.最高点.名称, '麦秸岭')
+  assert.equal(vm.回顾.最高点.海拔, 3500)
+})
+
+test('没走过任何节点时最高点为 null 而不是崩', () => {
+  const { s } = 收场('失败遇险')
+  const vm = endingViewModel(s, createJournal())
+  assert.equal(vm.回顾.最高点, null)
+})
