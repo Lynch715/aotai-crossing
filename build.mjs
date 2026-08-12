@@ -78,7 +78,11 @@ export function assertHtmlPlaceholders(html) {
 export function buildHtml() {
   const shell = readFileSync(join(ROOT, 'src/index.html'), 'utf8')
   assertHtmlPlaceholders(shell)
-  return shell.replace('__STYLES__', '').replace('__SCRIPT__', buildScript())
+  const styles = readFileSync(join(ROOT, 'src/styles.css'), 'utf8')
+  if (styles.includes('</style')) {
+    throw new Error('src/styles.css 含 </style，会提前闭合样式块')
+  }
+  return shell.replace('__STYLES__', styles).replace('__SCRIPT__', buildScript())
 }
 
 // 仅在直接执行时写盘，被 import 时不产生副作用
