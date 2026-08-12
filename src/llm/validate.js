@@ -185,3 +185,35 @@ export function validateProposal(state, proposal) {
 
   return out
 }
+
+// 天气等级 1–10。计划一里 weather.等级 初始化为 1 之后没有任何写入方，
+// 是个孤儿字段；而 sleep() 的「恶劣天气」又要调用方凭空判断。
+// 这里给出唯一定义：从 LLM 写的天气描述里按关键词解出等级，>= 6 即恶劣。
+const WEATHER_LEVELS = [
+  [10, ['白化天', '白毛风']],
+  [9, ['暴风雪', '雪暴']],
+  [8, ['雷暴', '冰雹']],
+  [7, ['暴雨', '大雪', '狂风']],
+  [6, ['大风', '强风', '降雪', '雨夹雪']],
+  [5, ['小雨', '阵雨', '霜冻']],
+  [4, ['雾', '阴沉', '低云']],
+  [3, ['阴天', '转阴天']],
+  [2, ['多云', '微风']],
+  [1, ['晴', '无风', '晴朗']],
+]
+
+const 认不出时的等级 = 4
+
+export function weatherLevel(描述) {
+  if (typeof 描述 !== 'string' || !描述) return 认不出时的等级
+  let 最高 = 0
+  for (const [级, 词表] of WEATHER_LEVELS) {
+    if (级 <= 最高) continue
+    if (词表.some((w) => 描述.includes(w))) 最高 = 级
+  }
+  return 最高 || 认不出时的等级
+}
+
+export function isHarshWeather(weather) {
+  return !!weather && weather.等级 >= 6
+}

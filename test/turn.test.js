@@ -342,3 +342,17 @@ test('离队后好感门槛不再为他放行', async () => {
   const { gap: 离队后 } = gapFor({ 好感: { chenyan: 40 } }, s)
   assert.equal(离队后, UNREACHABLE, '人都走了，门槛还放行')
 })
+
+test('LLM 提的天气会解析出等级，不再是孤儿字段', async () => {
+  const s = 局面()
+  const r = await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: { apiKey: 'k', baseURL: 'https://x/v1', model: 'm' },
+    streamImpl: async () => ({
+      text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{"天气建议":"转北风，夜间可能暴风雪"}',
+    }),
+  })
+  assert.equal(r.ok, true)
+  assert.equal(s.weather.等级, 9, `暴风雪应为 9 级，实为 ${s.weather.等级}`)
+})

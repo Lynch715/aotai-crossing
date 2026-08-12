@@ -9,7 +9,7 @@ import { recordNode, recordEvent, addForeshadow, resolveForeshadow, compressJour
 import { getNode } from './data/route.js'
 import { buildSystemPrompt, buildUserMessage, buildRepairMessage } from './llm/prompt.js'
 import { parseTurn } from './llm/parser.js'
-import { validateProposal, clampRequire, clampCost } from './llm/validate.js'
+import { validateProposal, clampRequire, clampCost, weatherLevel } from './llm/validate.js'
 import { streamChat } from './llm/client.js'
 
 export const MAX_REPAIR = 2
@@ -135,7 +135,8 @@ export async function runTurn({
     if (parsed.state.天气建议) {
       // 这是唯一不经 validateProposal 的 LLM 字段（纯展示、不参与任何判定），
       // 但仍要截断——模型偶尔会把整段天气描写塞进来。
-      state.weather = { 状态: String(parsed.state.天气建议).slice(0, 40), 等级: state.weather.等级 }
+      const 描述 = String(parsed.state.天气建议).slice(0, 40)
+      state.weather = { 状态: 描述, 等级: weatherLevel(描述) }
     }
 
     // LLM 申报的门槛挂回选项上，供下回合判定与置灰使用

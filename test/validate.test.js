@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveNpc, clampRequire, clampCost, validateProposal, CLAMP_TABLE } from '../src/llm/validate.js'
+import { resolveNpc, clampRequire, clampCost, validateProposal, weatherLevel, isHarshWeather, CLAMP_TABLE } from '../src/llm/validate.js'
 
 function 状态() {
   return {
@@ -230,4 +230,34 @@ test('离队原因过长会被截断', () => {
 
 test('没有离队字段时 离队 是空数组而不是 undefined', () => {
   assert.deepEqual(validateProposal(局面(), {}).离队, [])
+})
+
+test('天气等级按关键词解析，多个命中取最高', () => {
+  assert.equal(weatherLevel('晴'), 1)
+  assert.equal(weatherLevel('多云转阴'), 2)
+  assert.equal(weatherLevel('起雾了'), 4)
+  assert.equal(weatherLevel('大风'), 6)
+  assert.equal(weatherLevel('暴雨'), 7)
+  assert.equal(weatherLevel('暴风雪'), 9)
+  assert.equal(weatherLevel('白化天'), 10)
+  // 多个关键词取最高
+  assert.equal(weatherLevel('大风转暴风雪'), 9)
+})
+
+test('认不出的天气描述给中间值，不是 0 也不是 10', () => {
+  const lv = weatherLevel('天色不明')
+  assert.ok(lv >= 3 && lv <= 5, `认不出时应给中间值，实为 ${lv}`)
+})
+
+test('天气等级 >= 6 视为恶劣', () => {
+  assert.equal(isHarshWeather({ 等级: 5 }), false)
+  assert.equal(isHarshWeather({ 等级: 6 }), true)
+  assert.equal(isHarshWeather({ 等级: 10 }), true)
+  assert.equal(isHarshWeather(undefined), false)
+})
+
+test('空描述与非字符串不炸', () => {
+  assert.equal(typeof weatherLevel(''), 'number')
+  assert.equal(typeof weatherLevel(null), 'number')
+  assert.equal(typeof weatherLevel(123), 'number')
 })
