@@ -1,5 +1,5 @@
 import { getNode } from '../data/route.js'
-import { removeItem, consumeItem, hasItem } from './state.js'
+import { removeItem, hasItem } from './state.js'
 
 const 基础时段消耗 = 6
 const 负重基准线 = 15

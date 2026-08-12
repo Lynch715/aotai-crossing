@@ -1940,7 +1940,7 @@ Expected: FAIL — 模块不存在
 
 ```js
 import { getNode } from '../data/route.js'
-import { removeItem, consumeItem, hasItem } from './state.js'
+import { removeItem, hasItem } from './state.js'
 
 const 基础时段消耗 = 6
 const 负重基准线 = 15
@@ -4080,6 +4080,13 @@ git commit -m "feat: OpenAI 兼容客户端，SSE 流式与错误分类"
 ---
 
 ### Task 17: 回合编排与原子应用
+
+> **来自 T7 / T9 评审的三条预警，本任务是它们的落点：**
+>
+> 1. **`restore` 返回新对象，不原地改。** 回滚必须写成 `s = restore(snap)`。若别处还持有旧的 `s` 引用（比如传进了某个闭包），那些引用仍指向脏状态。
+> 2. **海拔有两个真相来源。** `sleep()` 按 `getNode(place.nodeId).海拔` 判是否累计高山适应，而 `stepStaminaCost()` 直接读 `place.海拔`。移动玩家时**两者必须同时更新**，否则会出现「按老节点算适应、按新海拔算消耗」的错位。建议移动统一走一个 helper。
+> 3. **`rest` / `eatHot` / `eatCold` 不推进时钟。** 它们只改体力和物资，`advanceSlot` 要由本任务显式调用。spec 写的「休整消耗一个时段」是在这里兑现的。
+
 
 **Files:**
 - Create: `src/turn.js`
