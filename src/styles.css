@@ -99,7 +99,7 @@ button.primary { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
   cursor: pointer;
   user-select: none;
 }
-.tag.on { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
+.tag.selected { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
 
 .item-row {
   display: flex;
@@ -110,7 +110,16 @@ button.primary { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
   border: 1px solid transparent;
   font-size: 12px;
 }
-.item-row.on { background: #16232b; border-color: #2f4a58; }
+.item-row.selected { background: #16232b; border-color: #2f4a58; }
+/* 选中项右侧打勾。此前 CSS 写 .on、代码写 .selected，类名对不上，
+   点了完全没反馈——捏人的性格/技能和商店三处全中。 */
+.item-row.selected .item-name::after {
+  content: '　✓';
+  color: var(--accent-bright);
+  font-weight: 700;
+}
+.tag { transition: background .12s, border-color .12s; }
+.tag:active { transform: scale(.94); }
 .item-row.blocked { opacity: .5; }
 
 .notice {
@@ -392,4 +401,26 @@ button.primary { background: #24404f; border-color: #3f6478; color: #c8e2f0; }
 .recap-peak {
   color: var(--accent-bright);
   font-weight: 600;
+}
+
+/* 等模型是全程最长的一段静默，点完到第一个字可能十几秒。
+   秒表要一直在走，玩家才知道是在等而不是死机。 */
+.thinking {
+  color: var(--accent-bright);
+  font-size: 13px;
+  padding: 10px 0 4px;
+  letter-spacing: .02em;
+}
+.thinking::before {
+  content: '';
+  display: inline-block;
+  width: 7px; height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  animation: thinking-pulse 1s ease-in-out infinite;
+}
+@keyframes thinking-pulse {
+  0%, 100% { opacity: .25; transform: scale(.8); }
+  50%      { opacity: 1;   transform: scale(1.15); }
 }

@@ -1,5 +1,5 @@
 import { ROUTE, getNode } from '../data/route.js'
-import { NPCS, getNpc } from '../data/npcs.js'
+import { NPCS, getNpc, PERSONALITY_TAGS } from '../data/npcs.js'
 import { GEAR, EXTRA_GEAR } from '../data/gear.js'
 import { SEASONS } from '../data/seasons.js'
 import { renderJournal } from '../engine/journal.js'
@@ -76,7 +76,8 @@ ${STATE_MARKER}
 选项的"类型"只能是 社交 / 徒步 / 高危 三者之一。每个选项都必须申报 require 与 cost。
 去向建议只能填当前位置的相邻节点。好感单回合变化不要超过 5，救命级事件可以加 "重大":true 并到 15。
 离队只在剧情里真的写了某人离开时才报，沉默或走得慢不算；离队不可逆，报错了收不回来；"因"控制在 30 字以内。
-说话人填本回合正文里说话最多的那个队友的名字，没人说话就省略——它决定立绘上谁亮起。`
+说话人填本回合正文里说话最多的那个队友的名字，没人说话就省略——它决定立绘上谁亮起。
+上面所有范例里的人名都只是示例，不是主角。主角是谁见 user message 的【你扮演的人】，正文里必须用那个名字。`
 }
 
 export function buildUserMessage({ state, journal, 既成事实, 最近回合 }) {
@@ -98,7 +99,23 @@ export function buildUserMessage({ state, journal, 既成事实, 最近回合 })
       ].join('\n')
     : '  （开局，尚无玩家选择）'
 
+  const 性格文案 = (PERSONALITY_TAGS.find((t) => t.id === state.pc.性格) || {}).文案 || state.pc.性格
+
+  // 主角块。此前 user message 里根本没有这一段——模型完全不知道玩家是谁，
+  // 只在 system prompt 的范例里见过「陈岩」，于是正文里就管主角叫陈岩。
+  // 捏人那一屏填的名字、职业、性格、外貌、技能，此前一个字都没发出去。
+  const 主角 = [
+    '【你扮演的人】',
+    `  ${state.pc.名字}，${state.pc.年龄} 岁${state.pc.性别}，${state.pc.职业}`,
+    `  性格：${性格文案}`,
+    `  外貌：${state.pc.外貌}`,
+    `  技能：${(state.pc.技能 || []).join('、') || '无'}`,
+    `  正文里称呼主角一律用「${state.pc.名字}」，或用第二人称「你」。绝不能叫别的名字。`,
+  ].join('\n')
+
   return [
+    主角,
+    '',
     renderJournal(journal),
     '',
     `【最近 ${近.length} 回合原文】`,

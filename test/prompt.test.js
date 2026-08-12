@@ -121,3 +121,32 @@ test('补救消息只要 STATE，且带上已生成的正文', () => {
   assert.ok(m.includes('只') || m.includes('仅'), '应明确要求只输出尾段')
   assert.ok(!m.includes('[鳌太万象]'), '补救时不该再要求写正文段落')
 })
+
+test('user message 必须带上主角是谁——否则模型会照范例叫陈岩', () => {
+  const s = 状态()
+  s.pc.名字 = '沈遇'
+  s.pc.职业 = '越野跑爱好者'
+  s.pc.外貌 = '偏瘦，晒得黑'
+  s.pc.技能 = ['装备维修', '生火']
+  const m = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: [] })
+  assert.ok(m.includes('沈遇'), '主角名字没进 prompt')
+  assert.ok(m.includes('越野跑爱好者'), '职业没进 prompt')
+  assert.ok(m.includes('偏瘦，晒得黑'), '外貌没进 prompt')
+  assert.ok(m.includes('装备维修'), '技能没进 prompt')
+  assert.ok(m.includes('【你扮演的人】'), '缺主角块标题')
+})
+
+test('性格翻成人话，不是把 id 丢给模型', () => {
+  const s = 状态()
+  s.pc.性格 = 'renside'
+  const m = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: [] })
+  assert.ok(m.includes('话不多'), `性格没翻译：${m.match(/性格：.*/)}`)
+  assert.ok(!m.includes('renside'), '把内部 id 丢给模型了')
+})
+
+test('明确要求正文用主角的名字', () => {
+  const s = 状态()
+  s.pc.名字 = '沈遇'
+  const m = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: [] })
+  assert.ok(m.includes('称呼主角'), '没告诉模型该怎么称呼主角')
+})

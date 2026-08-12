@@ -374,7 +374,8 @@ function renderShop(router) {
     APP物品列表.appendChild(el('div', { class: 'cat-head', text: 类.名称 }))
 
     for (const item of 类.物品) {
-      const APP行 = el('div', { class: item.买不起 ? 'item-row blocked' : 'item-row' })
+      const APP行类 = item.已选 ? 'item-row selected' : item.买不起 ? 'item-row blocked' : 'item-row'
+      const APP行 = el('div', { class: APP行类 })
 
       // 物品名 + 作用说明
       const APP名列 = el('div', { class: 'item-name' })
@@ -582,7 +583,9 @@ function renderGame(router) {
   // 剧情区
   const APP剧情区 = el('div', { class: 'prose-area' })
   const APP剧情标题 = el('div', { class: 'prose-title' })
+  const APP载入位 = el('div', { class: 'thinking', hidden: true })
   const APP剧情正文 = el('div')
+  APP剧情区.appendChild(APP载入位)
   APP剧情区.appendChild(APP剧情标题)
   APP剧情区.appendChild(APP剧情正文)
   APP右栏.appendChild(APP错误位)
@@ -700,6 +703,29 @@ function renderGame(router) {
     }
   }
 
+  let APP载入计时器 = null
+
+  function APP显示载入(开) {
+    if (APP载入计时器) {
+      clearInterval(APP载入计时器)
+      APP载入计时器 = null
+    }
+    if (!开) {
+      APP载入位.hidden = true
+      return
+    }
+    // 等模型是全程最长的一段静默，点完到第一个字可能十几秒。
+    // 没有动的东西，玩家会以为卡死了——所以要有一个明显在走的秒表。
+    const 起 = Date.now()
+    APP载入位.hidden = false
+    const 刷 = () => {
+      const 秒 = Math.floor((Date.now() - 起) / 1000)
+      setText(APP载入位, `正在推演这一回合…… ${秒}s`)
+    }
+    刷()
+    APP载入计时器 = setInterval(刷, 200)
+  }
+
   function APP渲染控制按钮(模式) {
     // 模式：'idle' | 'typing' | 'done'
     clear(APP控制区)
@@ -726,6 +752,8 @@ function renderGame(router) {
     APP渲染选项(APP当前选项, true)
     APP渲染控制按钮('typing')
 
+    APP显示载入(true)
+
     // 清空剧情区，准备打字机
     setText(APP剧情标题, '')
     clear(APP剧情正文)
@@ -739,7 +767,10 @@ function renderGame(router) {
     APP停止打字机()
     APP打字机Timer = setInterval(() => {
       const 文本 = tw.tick()
-      if (文本 !== null) APP渲染剧情(文本)
+      if (文本 !== null) {
+        APP显示载入(false)
+        APP渲染剧情(文本)
+      }
       if (tw.done()) {
         APP停止打字机()
         APP渲染控制按钮('done')
@@ -767,6 +798,7 @@ function renderGame(router) {
     })
 
     APP进行中 = false
+    APP显示载入(false)
 
     if (!r.ok) {
       // 出错：回滚（state 已在 runTurn 里回滚）、显示提示、保留选项
