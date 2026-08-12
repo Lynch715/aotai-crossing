@@ -32,6 +32,7 @@ export const MODULE_ORDER = [
   'src/ui/screen-create.js',
   'src/ui/screen-draw.js',
   'src/ui/screen-shop.js',
+  'src/ui/screen-game.js',
   'src/ui/app.js',
 ]
 
