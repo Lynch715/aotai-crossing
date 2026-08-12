@@ -20,14 +20,21 @@ export function isAcclimatized(state) {
   return state.flags.高海拔过夜数 >= 需要适应晚数
 }
 
-// 有效温标 = 睡袋温标 − 内胆加成。数字越低越保暖。
+// 有效温标 = 最保暖那件睡袋的温标 − 内胆加成。数字越低越保暖。
 // 没带睡袋记 +99：不是「有点冷」，是根本没有保暖可言。
-// 温标一律从 gear.js 读，不在这里硬编码——改了装备表，这里要跟着变。
+// 遍历所有睡袋而不是写死 sleeping_bag——装备表里不止一款，写死会让
+// 花大价钱买的极寒睡袋毫无作用，且没有任何测试会发现。
+const 睡袋清单 = ['sleeping_bag', 'winter_bag']
+
 export function effectiveWarmth(state) {
-  if (!hasItem(state, 'sleeping_bag')) return 毫无保暖
-  const 睡袋 = getGear('sleeping_bag')
+  const 温标表 = 睡袋清单
+    .filter((id) => hasItem(state, id))
+    .map((id) => getGear(id)?.温标)
+    .filter((v) => typeof v === 'number')
+  if (!温标表.length) return 毫无保暖
+  const 最暖 = Math.min(...温标表)
   const 加成 = hasItem(state, 'bag_liner') ? (getGear('bag_liner')?.温标加成 ?? 0) : 0
-  return 睡袋.温标 - 加成
+  return 最暖 - 加成
 }
 
 export function stepStaminaCost(state) {

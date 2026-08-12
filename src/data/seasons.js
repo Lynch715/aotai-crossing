@@ -51,18 +51,17 @@ export function gearWarnings(seasonId, ownedIds) {
     警告.push('夏季蚊虫叮咬频繁，未带防蚊液。')
   }
 
-  // 温标一律从 gear.js 读，不在这里硬编码——否则改了装备表，警告还按老值算，
-  // 而且没有任何测试会报错。温标越低越保暖；内胆的「温标加成」是保暖增量，
-  // 所以从睡袋温标里再减去它。
-  const 睡袋 = owned.has('sleeping_bag') ? getGear('sleeping_bag') : undefined
-  if (!睡袋) {
-    // 压根没带睡袋。只买内胆不买睡袋也走这条——内胆不能单独用。
+  // 温标一律从 gear.js 读，且遍历所有睡袋取最暖的那件——写死单一 id 会让
+  // 玩家买了极寒睡袋仍看到警告，那这笔钱就白花了。
+  const 睡袋们 = ['sleeping_bag', 'winter_bag'].filter((id) => owned.has(id))
+  if (!睡袋们.length) {
     if (season.夜间温度 < 0) {
       警告.push(`${season.名称}夜间约 ${season.夜间温度}℃，没带睡袋，夜里根本扛不住。`)
     }
   } else {
+    const 最暖 = Math.min(...睡袋们.map((id) => getGear(id).温标))
     const 加成 = owned.has('bag_liner') ? (getGear('bag_liner')?.温标加成 ?? 0) : 0
-    const 实际温标 = 睡袋.温标 - 加成
+    const 实际温标 = 最暖 - 加成
     if (season.夜间温度 < 实际温标) {
       警告.push(`${season.名称}夜间约 ${season.夜间温度}℃，睡袋温标 ${实际温标}℃ 不够用，夜里会冷醒甚至失温。`)
     }

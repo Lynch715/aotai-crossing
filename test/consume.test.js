@@ -251,3 +251,20 @@ test('没带睡袋时有效温标记为毫无保暖', () => {
   const s = 状态({ 海拔: 3100 })
   assert.equal(effectiveWarmth(s), 99)
 })
+
+test('有极寒睡袋时取最暖的那件算有效温标', () => {
+  const s = 状态({ 海拔: 3100 })
+  s.pack.push({ gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 })
+  assert.equal(effectiveWarmth(s), -10)
+  s.pack.push({ gearId: 'winter_bag', 档: '通用', 数量: 1, 单重: 1.8, 余量: 100 })
+  assert.equal(effectiveWarmth(s), -25, '带了极寒睡袋却还按普通睡袋算')
+})
+
+test('冬季带极寒睡袋不再失温', () => {
+  const s = 状态({ 海拔: 3100 })
+  s.meta.季节 = '冬季'
+  s.place.nodeId = 'shuiwozi'
+  s.pack.push({ gearId: 'winter_bag', 档: '通用', 数量: 1, 单重: 1.8, 余量: 100 })
+  sleep(s, { 恶劣天气: false })
+  assert.equal(s.flags.失温连败, 0)
+})

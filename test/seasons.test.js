@@ -76,3 +76,8 @@ test('压根没带睡袋要报警，只买内胆不算带了睡袋', () => {
 test('getSeason 取不到返回 undefined', () => {
   assert.equal(getSeason('雨季'), undefined)
 })
+
+test('冬季带极寒睡袋不再报温标警告', () => {
+  const w = gearWarnings('冬季', ['winter_bag'])
+  assert.ok(!w.some((x) => x.includes('温标')), `仍报警：${w.join('｜')}`)
+})
