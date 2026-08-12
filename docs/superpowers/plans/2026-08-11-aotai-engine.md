@@ -3330,8 +3330,38 @@ function resolveNode(name) {
   if (!name || typeof name !== 'string') return null
   const t = name.trim()
   if (getNode(t)) return t
-  const hit = ROUTE.find((n) => n.名称 === t || n.名称.startsWith(t))
-  return hit ? hit.id : null
+  const 精确 = ROUTE.find((n) => n.名称 === t)
+  if (精确) return 精确.id
+  // 前缀匹配只在唯一命中时才认。「大」同时前缀匹配大爷海与大文公庙，
+  // 谁胜出取决于数组顺序——等于让模型的手滑决定玩家被送到哪个山头。
+  const 候选 = ROUTE.filter((n) => n.名称.startsWith(t))
+  return 候选.length === 1 ? 候选[0].id : null
+}
+
+// 代价也是 LLM 现编的。不夹的话「cost: {体力: -50}」就是白送体力，
+// 「9999」则一步把人耗干。校验放在这里，T17 拿到的就是干净值。
+const 代价上限 = { 体力: 50, 时段: 3, 金钱: 100000 }
+
+export function clampCost(cost) {
+  const warnings = []
+  const out = {}
+  if (!cost || typeof cost !== 'object' || Array.isArray(cost)) return { cost: out, warnings }
+
+  for (const [键, 值] of Object.entries(cost)) {
+    if (typeof 值 !== 'number' || !Number.isFinite(值)) {
+      warnings.push(`代价「${键}」不是有限数字，已剔除`)
+      continue
+    }
+    const 上限 = 代价上限[键]
+    if (上限 === undefined) {
+      warnings.push(`未知代价项「${键}」，已剔除`)
+      continue
+    }
+    const 夹 = Math.max(0, Math.min(上限, 值))
+    if (夹 !== 值) warnings.push(`代价 ${键} ${值} 越界，夹到 ${夹}`)
+    out[键] = 夹
+  }
+  return { cost: out, warnings }
 }
 
 export function clampRequire(类型, require) {
@@ -3356,7 +3386,10 @@ export function clampRequire(类型, require) {
         warnings.push(`好感门槛引用了未知人物「${名}」，已剔除`)
         continue
       }
-      if (typeof 值 !== 'number') continue
+      if (typeof 值 !== 'number' || !Number.isFinite(值)) {
+        warnings.push(`${名} 的好感门槛不是数字，已剔除`)
+        continue
+      }
       const 夹 = Math.max(0, Math.min(rule.好感, 值))
       if (夹 !== 值) warnings.push(`${名} 好感门槛 ${值} 越界，夹到 ${夹}`)
       out.好感[id] = 夹
@@ -3378,6 +3411,9 @@ export function clampRequire(类型, require) {
 export function validateProposal(state, proposal) {
   const out = { 好感变更: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return out
+  // 「从不抛异常」得对 state 也成立，否则调用方传进半截状态时一样白屏。
+  const 队伍 = Array.isArray(state?.party) ? state.party : []
+  const 当前节点 = state?.place?.nodeId ?? null
 
   for (const item of Array.isArray(proposal.好感) ? proposal.好感 : []) {
     if (!item || typeof item !== 'object') continue
@@ -3386,7 +3422,7 @@ export function validateProposal(state, proposal) {
       out.warnings.push(`好感提议引用了未知人物「${item.npc}」，已驳回`)
       continue
     }
-    if (!state.party.some((p) => p.npcId === npcId && p.在队)) {
+    if (!队伍.some((p) => p.npcId === npcId && p.在队)) {
       out.warnings.push(`${item.npc} 不在队，好感提议已驳回`)
       continue
     }
@@ -3418,13 +3454,14 @@ export function validateProposal(state, proposal) {
       continue
     }
     const { require, warnings } = clampRequire(opt.类型, opt.require)
-    out.warnings.push(...warnings)
-    out.选项.push({ id, 类型: opt.类型 || '徒步', require, cost: opt.cost || {} })
+    const { cost, warnings: cw } = clampCost(opt.cost)
+    out.warnings.push(...warnings, ...cw)
+    out.选项.push({ id, 类型: opt.类型 || '徒步', require, cost })
   }
 
   if (proposal.去向建议) {
     const id = resolveNode(proposal.去向建议)
-    if (id && isAdjacent(state.place.nodeId, id)) {
+    if (id && 当前节点 && isAdjacent(当前节点, id)) {
       out.去向 = id
     } else {
       out.warnings.push(`去向建议「${proposal.去向建议}」不是当前位置的合法相邻节点，已驳回`)
@@ -3438,7 +3475,7 @@ export function validateProposal(state, proposal) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/validate.test.js`
-Expected: PASS，21 个测试全绿
+Expected: PASS，23 个测试全绿（计划正文原写 21，代码块实为 18，评审后补 5 条）
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 

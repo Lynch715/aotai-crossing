@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveNpc, clampRequire, validateProposal, CLAMP_TABLE } from '../src/llm/validate.js'
+import { resolveNpc, clampRequire, clampCost, validateProposal, CLAMP_TABLE } from '../src/llm/validate.js'
 
 function 状态() {
   return {
@@ -118,6 +118,44 @@ test('记忆与伏笔原样透传，空白项被剔除', () => {
   assert.deepEqual(r.记忆, ['D4晚 麦秸岭 判定失败'])
   assert.deepEqual(r.伏笔.新增, ['雾里的人影'])
   assert.deepEqual(r.伏笔.已收, ['石缝路标带'])
+})
+
+test('地名前缀必须唯一才认，含糊的一律驳回', () => {
+  // 「大」同时前缀匹配 大爷海 与 大文公庙，靠数组顺序决定去哪儿等于让手滑决定
+  assert.equal(validateProposal(状态(), { 去向建议: '大' }).去向, null)
+  // 唯一前缀仍然认
+  assert.equal(validateProposal({ ...状态(), place: { nodeId: 'yaowangdong', 海拔: 3360 } }, { 去向建议: '麦秸' }).去向, 'maijieling')
+})
+
+test('代价被夹取：负值归零，超限截断，未知项剔除', () => {
+  const { cost, warnings } = clampCost({ 体力: -50, 时段: 99, 金钱: 200, 玄学: 1, 运气: '爆棚' })
+  assert.equal(cost.体力, 0, '负代价等于白送体力')
+  assert.equal(cost.时段, 3)
+  assert.equal(cost.金钱, 200)
+  assert.equal(cost.玄学, undefined)
+  assert.equal(cost.运气, undefined)
+  assert.ok(warnings.length >= 4)
+})
+
+test('选项里的代价同样过夹取', () => {
+  const r = validateProposal(状态(), { 选项: [{ id: 'A', 类型: '徒步', cost: { 体力: -20 } }] })
+  assert.equal(r.选项[0].cost.体力, 0)
+  assert.ok(r.warnings.some((w) => w.includes('体力')))
+})
+
+test('非数字的好感门槛会报 warning，不静默丢弃', () => {
+  const { warnings } = clampRequire('社交', { 好感: { linxiaoya: '很高' } })
+  assert.ok(warnings.some((w) => w.includes('不是数字')), `实得 warnings: ${warnings}`)
+})
+
+test('state 畸形时同样不抛异常', () => {
+  const 提议 = { 好感: [{ npc: '林晓雅', delta: 3 }], 去向建议: '水窝子营地' }
+  for (const bad of [null, undefined, {}, { party: null }, { place: {} }, 42]) {
+    assert.doesNotThrow(() => validateProposal(bad, 提议), `炸在 state = ${JSON.stringify(bad)}`)
+    const r = validateProposal(bad, 提议)
+    assert.deepEqual(r.好感变更, [], 'state 不可信时不该放行好感变更')
+    assert.equal(r.去向, null)
+  }
 })
 
 test('空提议或 null 提议返回空结构，不炸', () => {
