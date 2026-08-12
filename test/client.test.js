@@ -213,3 +213,22 @@ test('玩家主动取消后不再重试，不替他烧 token', async () => {
   )
   assert.equal(调用次数, 1, `取消后仍重试了 ${调用次数} 次`)
 })
+
+test('预设不得使用已下线的模型名', () => {
+  // deepseek-chat / deepseek-reasoner 于 2026-07-24 下线；
+  // moonshot-v1-* 虽仍可用但已不对新注册用户开放，新玩家会撞墙。
+  // 这些名字过期后只报一句「模型不存在」，玩家看不出是我们的锅。
+  const 已下线 = ['deepseek-chat', 'deepseek-reasoner', 'moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k']
+  for (const p of PRESETS) {
+    for (const 死名 of 已下线) {
+      assert.notEqual(p.默认模型, 死名, `${p.名称} 用了已下线的模型名 ${死名}`)
+      assert.ok(!p.默认模型.endsWith('/' + 死名), `${p.名称} 用了已下线的模型名 ${p.默认模型}`)
+    }
+  }
+})
+
+test('每个预设的 baseURL 都是 https', () => {
+  for (const p of PRESETS) {
+    assert.ok(p.baseURL.startsWith('https://'), `${p.名称} 的 baseURL 不是 https：${p.baseURL}`)
+  }
+})
