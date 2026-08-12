@@ -311,7 +311,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `npm test`
-Expected: PASS，全部 10 个测试绿
+Expected: PASS，全部测试绿（数量以实际为准，别照抄写死的数字）
 
 - [ ] **Step 6: 跑一次真实构建**
 
@@ -329,7 +329,16 @@ git commit -m "feat: 构建管线，多文件拼接为单文件"
 
 ---
 
-**登记提醒：此后每新增一个 `src/` 模块，都必须把它的路径按拓扑顺序追加进 `build.mjs` 的 `MODULE_ORDER`，否则它不会进入单文件产物。后续每个 Task 的提交步骤都包含这一动作。**
+**登记提醒：此后每新增一个 `src/` 模块，都必须把它的路径按拓扑顺序追加进 `build.mjs` 的 `MODULE_ORDER`。后续每个 Task 的提交步骤都包含这一动作。**
+
+**实际实现比上面的片段多了四道加固（评审后追加，已落地在 `build.mjs`）：**
+
+1. `IMPORT_LINE` 容忍行尾注释——`import { a } from './x.js' // 说明` 这种行若漏进产物，会让整个游戏在加载时 `SyntaxError`（产物 `<script>` 没有 `type="module"`）。
+2. **产物求值冒烟测试**：`new Function(buildScript())()` 真跑一遍 bundle，并注入探针确认拼接后的函数可调用。这是此类静默损坏的结构性防线——比把正则写全更可靠，因为其余测试跑的都是 `src/` 的 ESM 原文，碰不到拼接产物。
+3. `assertModuleOrderComplete()` 递归扫描 `src/`，发现未登记的 `.js` 就报错并点名路径。忘记登记不再是静默缺模块。
+4. `buildHtml()` 校验 `__STYLES__` / `__SCRIPT__` 占位符存在，缺失即报错，不再静默产出无脚本的 HTML。
+
+已端到端验证：忘记登记新模块 → 4 个测试失败；登记了但用了被禁的多行 import → 求值测试与残留检查双双失败。
 
 ---
 
