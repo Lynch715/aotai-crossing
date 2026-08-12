@@ -1875,6 +1875,50 @@ test('时段推进：早→中→晚→次日早', () => {
   assert.deepEqual(advanceSlot(s).clock, { day: 2, slot: '早' })
 })
 
+test('气罐烧完换备用罐，炉头不会跟着丢掉', () => {
+  const s = 状态({ pc: { 体力: 0 } })
+  s.pack.push({ gearId: 'stove', 档: '主流', 数量: 1, 单重: 0.4, 余量: 100 })
+  s.pack.push({ gearId: 'freeze_dried', 档: '主流', 数量: 60, 单重: 1.2, 余量: 100 })
+
+  let 顿数 = 0
+  while (eatHot(s)) 顿数++
+  assert.equal(顿数, 12, `一罐 8%/顿应做 12 顿，实为 ${顿数}`)
+  assert.ok(s.pack.some((p) => p.gearId === 'stove'), '没气了也不该把炉头丢掉')
+})
+
+test('带备用气罐能多做热食——买备用不是白买', () => {
+  const s = 状态({ pc: { 体力: 0 } })
+  s.pack.push({ gearId: 'stove', 档: '主流', 数量: 1, 单重: 0.4, 余量: 100 })
+  s.pack.push({ gearId: 'extra_canister', 档: '通用', 数量: 2, 单重: 0.5, 余量: 100 })
+  s.pack.push({ gearId: 'freeze_dried', 档: '主流', 数量: 60, 单重: 1.2, 余量: 100 })
+
+  let 顿数 = 0
+  while (eatHot(s)) 顿数++
+  assert.equal(顿数, 36, `自带罐 + 2 备用罐应做 36 顿，实为 ${顿数}`)
+  assert.ok(!s.pack.some((p) => p.gearId === 'extra_canister'), '备用罐应已用尽')
+})
+
+test('主粮耗尽后自动启用额外主粮', () => {
+  const s = 状态()
+  s.pack.find((p) => p.gearId === 'staple_food').数量 = 3
+  s.pack.push({ gearId: 'extra_staple', 档: '通用', 数量: 4, 单重: 1.2, 余量: 100 })
+
+  assert.deepEqual(dailyUpkeep(s), { 断粮: false, 欠缺: 0 })
+  assert.equal(s.pack.find((p) => p.gearId === 'staple_food').数量, 1)
+
+  // 主粮只剩 1 份，缺口由额外主粮补上
+  dailyUpkeep(s)
+  assert.ok(!s.pack.some((p) => p.gearId === 'staple_food'), '主粮应已耗尽')
+  assert.equal(s.pack.find((p) => p.gearId === 'extra_staple').数量, 3)
+
+  dailyUpkeep(s)
+  assert.equal(s.pack.find((p) => p.gearId === 'extra_staple').数量, 1)
+
+  const 最后 = dailyUpkeep(s)
+  assert.equal(最后.断粮, true)
+  assert.equal(最后.欠缺, 1, '最后一天只吃到 1 份')
+})
+
 test('每日结算扣 2 份主粮，不足则扣到 0', () => {
   const s = 状态()
   dailyUpkeep(s)
@@ -1903,6 +1947,8 @@ const 负重基准线 = 15
 const 高海拔线 = 3400
 const 适应海拔线 = 3000
 const 需要适应晚数 = 1
+const 每次热食耗气 = 8
+const 每日主粮 = 2
 
 const SLOTS = ['早', '中', '晚']
 
@@ -1937,7 +1983,18 @@ export function eatHot(state) {
   if (!hasItem(state, 'stove')) return false
   const 有餐 = hasItem(state, 'freeze_dried') || hasItem(state, 'extra_freeze_dried')
   if (!有餐) return false
-  consumeItem(state, 'stove', 8)
+
+  // 气罐见底要换备用罐，而不是把整套炉具丢掉——直接 consumeItem 归零会连炉头
+  // 一起摘出背包。这里也是「带 2 罐比带 1 罐能多做热食」真正成立的地方：
+  // extra_canister 是独立 gearId，不是 stove 的数量叠加（见本任务开头的 T7 预警）。
+  const 炉 = state.pack.find((p) => p.gearId === 'stove')
+  if (炉.余量 < 每次热食耗气) {
+    if (!hasItem(state, 'extra_canister')) return false
+    removeItem(state, 'extra_canister', 1)
+    炉.余量 = 100
+  }
+  炉.余量 -= 每次热食耗气
+
   removeItem(state, hasItem(state, 'freeze_dried') ? 'freeze_dried' : 'extra_freeze_dried', 1)
   调整体力(state, 6)
   return true
@@ -1971,19 +2028,28 @@ export function advanceSlot(state) {
   return state
 }
 
-// 每天扣一次主粮。返回是否断粮，供结局判定参考。
+// 每天扣 2 份主粮；主粮见底后自动动用 extra_staple 这个缓冲池
+//（它的 每日消耗 标的是 0，正是「不自己扣、只在顶上时被动消耗」的意思）。
+// 返回是否断粮，供结局判定参考；欠缺 > 0 表示今天没吃够。
 export function dailyUpkeep(state) {
-  const 主粮 = state.pack.find((p) => p.gearId === 'staple_food')
-  if (!主粮) return { 断粮: true }
-  removeItem(state, 'staple_food', Math.min(2, 主粮.数量))
-  return { 断粮: !hasItem(state, 'staple_food') }
+  let 待扣 = 每日主粮
+  for (const id of ['staple_food', 'extra_staple']) {
+    if (待扣 <= 0) break
+    const 项 = state.pack.find((p) => p.gearId === id)
+    if (!项) continue
+    const 扣 = Math.min(待扣, 项.数量)
+    removeItem(state, id, 扣)
+    待扣 -= 扣
+  }
+  const 还有粮 = hasItem(state, 'staple_food') || hasItem(state, 'extra_staple')
+  return { 断粮: !还有粮, 欠缺: 待扣 }
 }
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/consume.test.js`
-Expected: PASS，18 个测试全绿。重点确认「spec 里的样例」那条——`floor(6 × 1.04^11.8) = 9` 是设计文档流转示例里的数字，对不上说明公式抄错了。
+Expected: PASS，21 个测试全绿。重点确认「spec 里的样例」那条——`floor(6 × 1.04^11.8) = 9` 是设计文档流转示例里的数字，对不上说明公式抄错了。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -2980,7 +3046,7 @@ export function parseTurn(raw) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/parser.test.js`
-Expected: PASS，18 个测试全绿。最后一条「从不抛异常」是这个模块的生命线——它失败就意味着线上会白屏。
+Expected: PASS，21 个测试全绿。最后一条「从不抛异常」是这个模块的生命线——它失败就意味着线上会白屏。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -3313,7 +3379,7 @@ export function validateProposal(state, proposal) {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/validate.test.js`
-Expected: PASS，18 个测试全绿
+Expected: PASS，21 个测试全绿
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
@@ -4441,7 +4507,7 @@ export async function runTurn({
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test -- test/turn.test.js`
-Expected: PASS，18 个测试全绿。**「网络整体失败 → 回滚」和「降级时不结算好感」两条是这个模块存在的全部理由**，它们绿了这个 Task 才算成。
+Expected: PASS，21 个测试全绿。**「网络整体失败 → 回滚」和「降级时不结算好感」两条是这个模块存在的全部理由**，它们绿了这个 Task 才算成。
 
 - [ ] **Step 5: 登记进构建顺序并跑全量测试**
 
