@@ -116,5 +116,6 @@ export function buildRepairMessage(已生成正文) {
 
 ${已生成正文}
 
-现在请仅输出 ${STATE_MARKER} 及其后的 JSON 对象，不要重复正文，不要输出任何其他段落。`
+现在请仅输出 ${STATE_MARKER} 及其后的 JSON 对象，不要重复正文，不要输出任何其他段落。
+直接以 ${STATE_MARKER} 开头，前面不要加「好的」「以下是」之类的任何文字。`
 }
