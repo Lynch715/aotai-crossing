@@ -15,6 +15,7 @@ export const MODULE_ORDER = [
   'src/engine/threshold.js',
   'src/engine/consume.js',
   'src/engine/affinity.js',
+  'src/engine/ending.js',
 ]
 
 // 只删真正的 import 语句（必须有 from 子句或裸副作用导入），
