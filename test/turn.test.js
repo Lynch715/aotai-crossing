@@ -118,6 +118,31 @@ test('跨天时扣每日主粮', async () => {
   assert.equal(s.pack.find((p) => p.gearId === 'staple_food').数量, 3)
 })
 
+test('麦秸岭晚间前往水窝子：先抵达营地再过夜，不在出发地露宿', async () => {
+  const s = 局面()
+  s.clock = { day: 1, slot: '晚' }
+  s.pc.体力 = 50
+  s.pack.push(
+    { gearId: 'tent', 档: '主流', 数量: 1, 单重: 2.4, 余量: 100 },
+    { gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 },
+    { gearId: 'bag_liner', 档: '通用', 数量: 1, 单重: 0.3, 余量: 100 },
+  )
+  const 客户端 = 假客户端(好回复)
+  const r = await 跑(s, createJournal(), {
+    streamImpl: 客户端,
+    选中项: { id: 'D', 文本: '沿路标稳妥前往水窝子营地', 类型: '徒步', require: {}, cost: {}, targetNodeId: 'shuiwozi' },
+  })
+
+  assert.equal(r.ok, true)
+  assert.deepEqual(s.clock, { day: 2, slot: '早' })
+  assert.equal(s.place.nodeId, 'shuiwozi')
+  assert.equal(s.pc.体力, 65, '应按水窝子正规有水营地回复，而不是在麦秸岭露宿')
+  assert.equal(s.flags.失温连败, 0)
+  assert.ok(客户端.调用[0][1].content.includes('先抵达水窝子营地'))
+  assert.ok(客户端.调用[0][1].content.includes('扎营、过夜'))
+  assert.ok(客户端.调用[0][1].content.includes('水窝子是大营地'), '跨夜营地事件应在抵达回合演出')
+})
+
 test('合法去向被应用，海拔跟着更新（判定成功的徒步回合才移动）', async () => {
   const s = 局面()
   await 跑(s, createJournal(), {

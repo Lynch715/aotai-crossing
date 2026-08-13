@@ -1,7 +1,7 @@
 import { snapshot, restore, consumeItem, hasItem } from './engine/state.js'
 import { makeRng } from './engine/rng.js'
 import { judgeOption, gapFor } from './engine/threshold.js'
-import { applyStepCost, advanceTimeSlot, stepStaminaCost, 调整体力 } from './engine/consume.js'
+import { applyStepCost, advanceSlot, settleOvernight, stepStaminaCost, 调整体力 } from './engine/consume.js'
 import { applyAffinityDelta, initialAffinity } from './engine/affinity.js'
 import { npcLeaves, npcJoins } from './engine/party.js'
 import { checkEnding, applyEnding } from './engine/ending.js'
@@ -161,16 +161,24 @@ export async function runTurn({
       state.pc.户外经验 = Math.min(100, state.pc.户外经验 + 历练)
     }
 
-    // 时段推进：1 个基础时段 + 选项申报的额外时段。跨天连锁（睡眠、日粮、
-    // 断粮惩罚）全在 advanceTimeSlot 里，这里只收集要告诉模型的事实。
+    // 时段推进：先走时钟，但把跨夜结算延后到“实际移动完成”之后。旧顺序会在
+    // 麦秸岭先睡一晚，再把位置挪到水窝子——玩家看起来就像跳过了营地。
     const 推进备注 = []
     const 路险 = applyTravelRisks(state, 选中项, 判定, 回合rng)
     推进备注.push(...路险.notes)
+    const 预计去向 = 行军 && 判定.outcome === 'success' && !路险.迷路
+      ? (选中项.targetNodeId ? getNode(选中项.targetNodeId) : nextMainNode(state.place.nodeId))
+      : null
     const 推进次数 = 1 + (typeof 净代价.时段 === 'number' ? Math.max(0, Math.floor(净代价.时段)) : 0)
+    let 待结算夜数 = 0
     for (let i = 0; i < 推进次数; i++) {
-      const r = advanceTimeSlot(state)
-      if (r.跨天 && r.欠缺 > 0) 推进备注.push(`断粮：今天少吃了 ${r.欠缺} 份主粮，体力额外受损`)
-      if (r.跨天 && state.flags.失温连败 > 0) 推进备注.push(`夜里睡袋扛不住低温，出现失温征兆（连续 ${state.flags.失温连败} 晚）`)
+      const 日前 = state.clock.day
+      advanceSlot(state)
+      if (state.clock.day !== 日前) 待结算夜数 += 1
+    }
+    if (待结算夜数 > 0) {
+      const 落点 = 预计去向 || getNode(state.place.nodeId)
+      推进备注.push(`跨夜顺序：必须先抵达${落点?.名称 || '落脚点'}，演出扎营、过夜，再进入第${state.clock.day}天${state.clock.slot}；不得直接跳往下一路段`)
     }
     if (金钱前 !== state.money) 推进备注.push(`花掉 ¥${金钱前 - state.money}`)
     if (历练 > 0) 推进备注.push(`险中求成，户外经验 +${历练}`)
@@ -185,7 +193,12 @@ export async function runTurn({
     // —— 季节固定事件：到点即触发，一局一次 ——
     // 在请求前落账（记入 flags），失败回滚会连带撤销。指令注入 user message，
     // 模型必须把它演进本回合的剧情里。
-    const 事件 = pickEvent(state)
+    // 跨夜回合的主事件属于“抵达的营地”，不是出发地。这样麦秸岭→水窝子
+    // 会在本回合演出水窝子营地，而不是等到次日出发飞机梁时才补演。
+    const 事件局面 = 待结算夜数 > 0 && 预计去向
+      ? { ...state, place: { nodeId: 预计去向.id, 海拔: 预计去向.海拔 } }
+      : state
+    const 事件 = pickEvent(事件局面)
     if (事件) state.flags.触发过的事件id.push(事件.id)
 
     // —— 请求 ——
@@ -249,6 +262,17 @@ export async function runTurn({
       finish: finish ?? null, reasoning: reasoning ?? 0,
     }
 
+    let 跨夜已结算 = false
+    const 完成跨夜结算 = () => {
+      if (跨夜已结算) return
+      跨夜已结算 = true
+      for (let i = 0; i < 待结算夜数; i++) {
+        const r = settleOvernight(state)
+        if (r.欠缺 > 0) 结果.warnings.push(`断粮：少吃了 ${r.欠缺} 份主粮，体力额外受损`)
+        if (state.flags.失温连败 > 0) 结果.warnings.push(`夜里睡袋扛不住低温，出现失温征兆（连续 ${state.flags.失温连败} 晚）`)
+      }
+    }
+
     // finish_reason === 'length' 是被 max_tokens 截断的铁证。
     // 不点破的话，正文缺一半、STATE 没了，只能靠猜。
     if (finish === 'length') {
@@ -262,6 +286,7 @@ export async function runTurn({
       结果.降级 = true
       结果.选项 = [稳妥推进选项(state, 'A'), ...FALLBACK_OPTIONS.slice(1).map((o) => ({ ...o }))]
       结果.warnings.push(`STATE 补救 ${MAX_REPAIR} 次仍失败，本回合不结算`)
+      完成跨夜结算()
       结果.ending = checkEnding(state)
       if (结果.ending) applyEnding(state, 结果.ending)
       return 结果
@@ -330,6 +355,9 @@ export async function runTurn({
       const 全文 = String(parsed.state.天气建议)
       state.weather = { 状态: 全文.slice(0, 40), 等级: weatherLevel(全文) }
     }
+
+    // 位置和天气都已落定，现在才在真正的落点结算睡眠与日粮。
+    完成跨夜结算()
 
     // LLM 申报的门槛挂回选项上，供下回合判定与置灰使用
     for (const o of 结果.选项) {

@@ -151,6 +151,15 @@ export function advanceSlot(state) {
 const 恶劣天气线 = 6
 const 每份欠粮惩罚 = 8
 
+// 完成一次夜间结算。徒步回合会先把时钟跨到次日，再在真正抵达的落点调用
+// 这里；原生休整等不移动的操作则仍由 advanceTimeSlot 当场调用。
+export function settleOvernight(state) {
+  sleep(state, { 恶劣天气: (state.weather?.等级 ?? 0) >= 恶劣天气线 })
+  const { 断粮, 欠缺 } = dailyUpkeep(state)
+  if (欠缺 > 0) 调整体力(state, -欠缺 * 每份欠粮惩罚)
+  return { 断粮, 欠缺 }
+}
+
 // 推进一个时段，并处理跨天的全部连锁（睡眠、日粮、断粮惩罚）。
 // 这段连锁此前内联在 turn.js 里；「原地休整」等原生操作也要推进时段，
 // 各写一份的话，总有一份会漏掉 sleep() 或断粮惩罚。唯一入口，谁调都一样。
@@ -159,11 +168,7 @@ export function advanceTimeSlot(state) {
   advanceSlot(state)
   if (state.clock.day === 日前) return { 跨天: false, 断粮: false, 欠缺: 0 }
 
-  sleep(state, { 恶劣天气: (state.weather?.等级 ?? 0) >= 恶劣天气线 })
-  const { 断粮, 欠缺 } = dailyUpkeep(state)
-  // 断粮的后果：每欠一份主粮扣体力。没有这一条，断粮只是一个没人读的返回值，
-  // 游戏可以无限期原地不动——推进压力就来自这里和体力线。
-  if (欠缺 > 0) 调整体力(state, -欠缺 * 每份欠粮惩罚)
+  const { 断粮, 欠缺 } = settleOvernight(state)
   return { 跨天: true, 断粮, 欠缺 }
 }
 
