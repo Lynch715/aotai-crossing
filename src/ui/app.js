@@ -796,19 +796,16 @@ function renderGame(router) {
     }
   }
 
-  let APP上次场景 = state.place.nodeId
-
   function APP刷新顶栏() {
     const v = gameViewModel({ state, 回合: null, 说话人: null })
     setText(APP节点名, v.顶栏.地点)
     setText(APP时间, v.顶栏.时间)
     setText(APP海拔, v.顶栏.海拔 + 'm')
     setText(APP天气, v.顶栏.天气)
-    // 换了路段才重新探测场景图，原地不动不发无谓的图片请求
-    if (state.place.nodeId !== APP上次场景) {
-      APP上次场景 = state.place.nodeId
-      sceneInto(APP场景带, state.place.nodeId)
-    }
+    // 场景图每次都刷，不做「变了才刷」的聪明判断——sceneInto 是
+    // 新图加载成功才替换，同图命中缓存零成本；省掉的那点请求不值得
+    // 为它养一个可能失同步的状态变量。
+    sceneInto(APP场景带, state.place.nodeId)
   }
 
   // 原生操作共用的收尾：存档、刷面板、刷顶栏，并接住可能触发的结局。

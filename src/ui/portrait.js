@@ -69,9 +69,14 @@ export function scenePath(nodeId) {
 }
 
 export function sceneInto(容器, nodeId) {
-  容器.classList.remove('has-img')
-  容器.textContent = ''
-  if (!nodeId) return 容器
+  if (!nodeId) {
+    容器.classList.remove('has-img')
+    容器.textContent = ''
+    return 容器
+  }
+  // 换图采用「新图加载成功才替换」：旧图先留着，加载完再换。
+  // 这让调用方可以每回合无脑调一次——同一张图命中浏览器缓存立即返回、
+  // 零闪烁；换了路段就平滑切换；目标图缺失则整条隐藏。
   const img = new Image()
   img.alt = ''
   img.className = 'scene-img'
@@ -79,6 +84,10 @@ export function sceneInto(容器, nodeId) {
     容器.textContent = ''
     容器.appendChild(img)
     容器.classList.add('has-img')
+  }
+  img.onerror = () => {
+    容器.classList.remove('has-img')
+    容器.textContent = ''
   }
   img.src = scenePath(nodeId)
   return 容器

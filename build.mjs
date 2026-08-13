@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -90,6 +91,19 @@ export function assertHtmlPlaceholders(html) {
   if (!html.includes('__SCRIPT__')) throw new Error('src/index.html 缺少 __SCRIPT__ 占位符，产物将不含脚本')
 }
 
+// 构建版本戳：短哈希 + 构建时刻，显示在页面页脚。
+// 它存在的意义是终结「我改的到底上线了没」之争——Pages 有 10 分钟
+// HTTP 缓存，微信 webview 缓存更顽固，没有版本戳只能靠猜。
+export function buildStamp() {
+  let hash = 'dev'
+  try {
+    hash = execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim()
+  } catch { /* 没有 git 的环境（如解压的源码包）就只标时间 */ }
+  const t = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  return `${hash} · ${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())}`
+}
+
 export function buildHtml() {
   const shell = readFileSync(join(ROOT, 'src/index.html'), 'utf8')
   assertHtmlPlaceholders(shell)
@@ -102,7 +116,10 @@ export function buildHtml() {
   // （比如正则 `...(.*)$` 的收尾），$` 就会把「匹配位置之前的全部内容」
   // 也就是整段 CSS 塞进脚本里，产物直接语法错误、整页白屏。
   // 替换函数没有这层展开。
-  return shell.replace('__STYLES__', () => styles).replace('__SCRIPT__', () => buildScript())
+  return shell
+    .replace('__STYLES__', () => styles)
+    .replace('__SCRIPT__', () => buildScript())
+    .replace('__BUILD__', () => buildStamp())
 }
 
 // 仅在直接执行时写盘，被 import 时不产生副作用
