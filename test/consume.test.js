@@ -104,13 +104,21 @@ test('冷食 +3 并消耗一份路餐', () => {
   assert.equal(s.pack.some((p) => p.gearId === 'trail_snack'), false)
 })
 
-test('睡眠：有帐篷睡袋且在营地 +25', () => {
+test('睡眠：有帐篷睡袋且在营地 +25，有水源的正规营地再 +5', () => {
   const s = 状态({ pc: { 体力: 50 }, 海拔: 3100 })
   s.place.nodeId = 'shuiwozi'
   s.pack.push({ gearId: 'tent', 档: '主流', 数量: 1, 单重: 2.4, 余量: 100 })
   s.pack.push({ gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 })
   sleep(s, { 恶劣天气: false })
-  assert.equal(s.pc.体力, 75)
+  assert.equal(s.pc.体力, 80, '水窝子有水源：25 + 5')
+
+  // 东源可扎营但无水源，只有基础 25
+  const s2 = 状态({ pc: { 体力: 50 }, 海拔: 3400 })
+  s2.place.nodeId = 'dongyuan'
+  s2.pack.push({ gearId: 'tent', 档: '主流', 数量: 1, 单重: 2.4, 余量: 100 })
+  s2.pack.push({ gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 })
+  sleep(s2, { 恶劣天气: false })
+  assert.equal(s2.pc.体力, 75)
 })
 
 test('睡眠：缺装备或恶劣天气减半', () => {

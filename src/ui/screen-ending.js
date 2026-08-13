@@ -25,6 +25,19 @@ function 最高节点(journal) {
   return 最高 ? { 名称: 最高.名称, 海拔: 最高.海拔 } : null
 }
 
+// 结算称号：一句话给这一局定性。数字之外要有一个能记住、能跟朋友说的词。
+function 称号of(state) {
+  const t = state.ending?.type
+  if (t === '成功穿越') {
+    if (state.clock.day <= 6) return '秦岭老驴'
+    if (state.clock.day <= 9) return '稳扎稳打的完成者'
+    return '磨出来的胜利'
+  }
+  if (t === '主动下撤') return '知进退的明白人'
+  if (t === '被救援') return '捡回一条命'
+  return '山把你留下了'
+}
+
 export function endingViewModel(state, journal) {
   if (state.phase !== '结局' || !state.ending) return null
   // 未知结局类型也要给出页面。此前返回 null 会让玩家在一片空白里
@@ -41,8 +54,14 @@ export function endingViewModel(state, journal) {
     说明: 文案.说明,
     原因: state.ending.原因 || '',
     罚款: state.ending.type === '成功穿越' ? FINE_AMOUNT : 0,
+    称号: 称号of(state),
     回顾: {
       天数: state.clock.day,
+      最低体力: state.flags?.最低体力 ?? null,
+      受伤次数: (state.pc.伤病 || []).length,
+      剩余主粮: (state.pack || [])
+        .filter((p) => p.gearId === 'staple_food' || p.gearId === 'extra_staple')
+        .reduce((s, p) => s + p.数量, 0),
       最高点: 最高节点(journal),
       节点: (journal.已过节点 || []).map((id) => {
         const n = getNode(id)

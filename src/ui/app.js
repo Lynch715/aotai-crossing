@@ -16,7 +16,9 @@ import { createTypewriter, splitParagraphs } from './prose.js'
 import { rollSeason, getSeason } from '../data/seasons.js'
 import { getNpc } from '../data/npcs.js'
 import { makeRng } from '../engine/rng.js'
-import { createInitialState } from '../engine/state.js'
+import { createInitialState, addItem } from '../engine/state.js'
+import { getNode } from '../data/route.js'
+import { recordNode } from '../engine/journal.js'
 import { eatHot, eatCold, rest, advanceTimeSlot } from '../engine/consume.js'
 import { checkEnding, applyEnding } from '../engine/ending.js'
 import { createJournal } from '../engine/journal.js'
@@ -166,6 +168,21 @@ function renderCreate(router) {
     }, [g])
   ))
 
+  // 起点二选一：塘口经典线（出发赠 2 份主粮——村口最后采买）；
+  // 苗圃简易路直插盆景园跳过火烧坡（前段稍短，少一次补给）。重开价值所在。
+  const APP起点选择 = el('div', { class: 'row' }, [
+    { id: 'tangkou', 文案: '塘口起步 · 经典线，村口多补 2 份主粮' },
+    { id: 'miaopu', 文案: '苗圃起步 · 前段稍短，少一次补给' },
+  ].map((q) =>
+    el('button', {
+      class: (APP会话.draft.起点 || 'tangkou') === q.id ? 'tag selected' : 'tag',
+      onclick: () => {
+        APP会话.draft = { ...APP会话.draft, 起点: q.id }
+        renderCreate(router)
+      },
+    }, [q.文案])
+  ))
+
   // 外貌输入
   const APP外貌输入 = el('input', {
     type: 'text',
@@ -263,6 +280,7 @@ function renderCreate(router) {
     el('label', { text: '职业' }), APP职业选择,
     el('label', { text: '年龄' }), APP年龄输入,
     el('label', { text: '性别' }), APP性别选择,
+    el('label', { text: '起点' }), APP起点选择,
     el('label', { text: '外貌' }), APP外貌输入,
     el('div', { class: 'sep' }),
     el('h2', { text: '性格' }),
@@ -521,11 +539,18 @@ function APP出发(shopVm, router) {
     state = createInitialState({
       种子: APP会话.种子,
       季节: APP会话.季节,
+      起点: APP会话.draft.起点 || 'tangkou',
       pc,
       队友: APP会话.队友,
       背包: shopVm.背包,
       金钱: START_MONEY - shopVm.总价,
     })
+    // 塘口起步的「多一次补给」：村口小卖部最后采买，赠 2 份主粮。
+    // 苗圃起步的优势在路线本身（简易路直插盆景园，跳过火烧坡）。
+    if ((APP会话.draft.起点 || 'tangkou') === 'tangkou') {
+      const 已有主粮 = state.pack.find((p) => p.gearId === 'staple_food')
+      addItem(state, 'staple_food', 已有主粮 ? 已有主粮.档 : '经济', 2)
+    }
   } catch (err) {
     // createInitialState 在起点节点不合法时抛异常，这里保底报错、不让界面白屏
     const APP错误屏 = document.getElementById('screen-shop')
@@ -831,6 +856,7 @@ function renderGame(router) {
   }
 
   let APP求救待确认 = false
+  let APP下撤待确认 = null
 
   function APP渲染行动区() {
     const avm = actionsViewModel(state)
@@ -859,6 +885,44 @@ function renderGame(router) {
         onclick: () => { if (!APP进行中) 动作() },
       }, [a.文案]))
     }
+    // 下撤分叉（原生战略操作）：两段式确认，确认即结束本局。
+    for (const 撤 of avm.下撤列表) {
+      const 待确认 = APP下撤待确认 === 撤.nodeId
+      APP行动区.appendChild(el('button', {
+        disabled: APP进行中 || undefined,
+        onclick: () => {
+          if (APP进行中) return
+          if (!待确认) {
+            APP下撤待确认 = 撤.nodeId
+            APP渲染行动区()
+            setText(APP行动反馈, `再点一次确认——从${撤.名称}出山，这一局就结束了。`)
+            return
+          }
+          APP下撤待确认 = null
+          state.place.nodeId = 撤.nodeId
+          state.place.海拔 = getNode(撤.nodeId).海拔
+          recordNode(journal, 撤.nodeId)
+          APP结算原生操作('')
+        },
+      }, [待确认 ? `确认从${撤.名称}出山？` : 撤.文案]))
+    }
+
+    // 接待站补给（大爷海/大文公庙）：花钱补主粮，有炉具顺带换满气
+    if (avm.补给.在接待站) {
+      APP行动区.appendChild(el('button', {
+        disabled: (!avm.补给.可用 || APP进行中) || undefined,
+        title: avm.补给.原因 || undefined,
+        onclick: () => {
+          if (APP进行中 || !avm.补给.可用) return
+          state.money -= avm.补给.价格
+          addItem(state, 'staple_food', '经济', 4)
+          const 炉 = state.pack.find((p) => p.gearId === 'stove')
+          if (炉) 炉.余量 = 100
+          APP结算原生操作(`在接待站补了 4 份主粮${炉 ? '、换满了气罐' : ''}，花 ¥${avm.补给.价格}`)
+        },
+      }, [avm.补给.文案]))
+    }
+
     // 求救两段式确认——它直接终局，误触代价太大。设备是玩家花钱买的，
     // 这个按钮就是它「保命」承诺兑现的地方。
     const 救 = avm.求救
@@ -1227,6 +1291,24 @@ function renderEnding(router) {
   const APP天数行 = el('div', { class: 'recap-item' })
   setText(APP天数行, '坚持了 ' + vm.回顾.天数 + ' 天')
   APP基本回顾.appendChild(APP天数行)
+
+  // 硬核数字：最低体力、受伤、余粮——这些比形容词更有说服力
+  if (typeof vm.回顾.最低体力 === 'number') {
+    const 行 = el('div', { class: 'recap-item' })
+    setText(行, '最低体力：' + vm.回顾.最低体力)
+    APP基本回顾.appendChild(行)
+  }
+  const APP受伤行 = el('div', { class: 'recap-item' })
+  setText(APP受伤行, '受伤：' + vm.回顾.受伤次数 + ' 次')
+  APP基本回顾.appendChild(APP受伤行)
+  const APP余粮行 = el('div', { class: 'recap-item' })
+  setText(APP余粮行, '剩余主粮：' + vm.回顾.剩余主粮 + ' 份')
+  APP基本回顾.appendChild(APP余粮行)
+  if (vm.称号) {
+    const APP称号行 = el('div', { class: 'recap-item recap-peak' })
+    setText(APP称号行, '评价：「' + vm.称号 + '」')
+    APP基本回顾.appendChild(APP称号行)
+  }
 
   if (vm.回顾.最高点) {
     const APP最高点行 = el('div', { class: 'recap-item recap-peak' })

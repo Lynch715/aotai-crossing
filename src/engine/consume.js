@@ -52,6 +52,11 @@ export function stepStaminaCost(state) {
 
 export function 调整体力(state, delta) {
   state.pc.体力 = Math.max(0, Math.min(100, state.pc.体力 + delta))
+  // 全程最低体力在唯一写入口记账——结算页要用（「最低体力 11」这种数字
+  // 比任何形容词都有说服力）。旧档没有该字段时按当前值起算。
+  if (state.flags && state.pc.体力 < (state.flags.最低体力 ?? 100)) {
+    state.flags.最低体力 = state.pc.体力
+  }
   return state
 }
 
@@ -95,7 +100,10 @@ export function sleep(state, { 恶劣天气 = false } = {}) {
   const node = getNode(state.place.nodeId)
   const 装备齐 = hasItem(state, 'tent') && hasItem(state, 'sleeping_bag')
   const 条件好 = 装备齐 && node && node.可扎营 && !恶劣天气
-  调整体力(state, 条件好 ? 25 : 12)
+  // 有水源的正规营地（盆景园、水窝子、2800、西源……）恢复力更强——
+  // 能打水做饭洗漱，睡得就是踏实。这也让「赶到营地再睡」有了数值意义。
+  const 水源营地加成 = 条件好 && node.有水源 ? 5 : 0
+  调整体力(state, (条件好 ? 25 : 12) + 水源营地加成)
 
   if (node && node.海拔 >= 适应海拔线) state.flags.高海拔过夜数 += 1
 

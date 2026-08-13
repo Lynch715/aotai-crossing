@@ -437,15 +437,92 @@ test('勉强档赌赢经验 +2 封顶 100，达标与失败不涨', async () => 
   assert.equal(await 跑一把({ 经验: 43 }, () => 0.99), 38, '赌输不涨')
 })
 
-test('主线完成度：起点 1/21，苗圃等价起点，下撤点隐藏', async () => {
+test('主线完成度：起点 1/27，苗圃等价起点，下撤点隐藏', async () => {
   const { mainProgress } = await import('../src/data/route.js')
-  assert.deepEqual(mainProgress('tangkou'), { 序号: 1, 总数: 21 })
-  assert.deepEqual(mainProgress('miaopu'), { 序号: 1, 总数: 21 })
-  assert.deepEqual(mainProgress('baxiantai'), { 序号: 17, 总数: 21 })
+  assert.deepEqual(mainProgress('tangkou'), { 序号: 1, 总数: 27 })
+  assert.deepEqual(mainProgress('miaopu'), { 序号: 1, 总数: 27 })
+  assert.deepEqual(mainProgress('baxiantai'), { 序号: 23, 总数: 27 })
   assert.equal(mainProgress('hetaoping'), null)
   const { gameViewModel } = await import('../src/ui/screen-game.js')
   const s = 局面()
-  assert.equal(gameViewModel({ state: s, 回合: null, 说话人: null }).顶栏.行程, '行程 7/21')
+  assert.equal(gameViewModel({ state: s, 回合: null, 说话人: null }).顶栏.行程, '行程 7/27')
+})
+
+// ── 七阶段路线重组 ────────────────────────────────────────────────
+
+test('分段节点接进主线，苗圃有直插盆景园的近路', async () => {
+  const { isAdjacent } = await import('../src/data/route.js')
+  assert.ok(isAdjacent('shuiwozi', 'feijiliang1'))
+  assert.ok(isAdjacent('feijiliang1', 'feijiliang2'))
+  assert.ok(isAdjacent('feijiliang3', 'yingdi2800'))
+  assert.ok(isAdjacent('jiuchongshihai3', 'dongyuan'))
+  assert.ok(isAdjacent('miaopu', 'yingdi2900'), '苗圃近路：跳过火烧坡')
+  assert.ok(isAdjacent('miaopu', 'huoshaopo'), '苗圃也可走经典线')
+  assert.ok(!isAdjacent('shuiwozi', 'feijiliang2'), '不能跳段')
+})
+
+test('旧档迁移 v1→v2：老节点 id 映射到分段首段，flags 补最低体力', async () => {
+  const { migrateSave } = await import('../src/ui/save.js')
+  const 老包 = {
+    版本: 1, 摘要: 'x',
+    state: { place: { nodeId: 'feijiliang', 海拔: 3450 }, pc: { 体力: 66 }, flags: {} },
+    journal: { 已过节点: ['tangkou', 'jiuchongshihai'] },
+  }
+  const r = migrateSave(老包)
+  assert.ok(r.可用 && r.迁移过)
+  assert.equal(r.包.state.place.nodeId, 'feijiliang1')
+  assert.deepEqual(r.包.journal.已过节点, ['tangkou', 'jiuchongshihai1'])
+  assert.equal(r.包.state.flags.最低体力, 66)
+})
+
+test('阶段事件：西源必提示石海，拔仙台演出登顶≠通关', async () => {
+  const { pickEvent } = await import('../src/data/events.js')
+  const s = 局面()
+  s.place = { nodeId: 'xiyuan', 海拔: 3100 }
+  assert.equal(pickEvent(s).id, 'xiyuan_warning')
+  s.place = { nodeId: 'baxiantai', 海拔: 3767 }
+  assert.ok(pickEvent(s).指令.includes('登顶不等于安全'))
+  s.place = { nodeId: 'jiuchongshihai2', 海拔: 3400 }
+  assert.ok(pickEvent(s).指令.includes('两条路线'), '石海中段应有路线抉择')
+})
+
+test('下撤按钮只在分叉点出现；接待站才有补给', () => {
+  const s = 局面() // 在水窝子
+  const a = actionsViewModel(s)
+  assert.deepEqual(a.下撤列表.map((x) => x.nodeId), ['hetaoping'], '水窝子可南撤核桃坪')
+  assert.equal(a.补给.在接待站, false)
+
+  s.place = { nodeId: 'yingdi2800', 海拔: 2800 }
+  const b = actionsViewModel(s)
+  assert.deepEqual(b.下撤列表.map((x) => x.nodeId).sort(), ['hetaoping', 'songpingsi'], '2800 双向下撤')
+
+  s.place = { nodeId: 'dayehai', 海拔: 3590 }
+  const c = actionsViewModel(s)
+  assert.equal(c.补给.在接待站, true)
+  assert.equal(c.补给.可用, true, '现金 4320 足够 ¥200 补给')
+  s.money = 100
+  assert.equal(actionsViewModel(s).补给.可用, false, '现金不足应禁用')
+
+  s.place = { nodeId: 'maijieling', 海拔: 3500 }
+  assert.equal(actionsViewModel(s).下撤列表.length, 0, '非分叉点无下撤按钮')
+})
+
+test('结算页称号与硬核数字', async () => {
+  const { endingViewModel } = await import('../src/ui/screen-ending.js')
+  const s = 局面()
+  s.phase = '结局'
+  s.clock.day = 6
+  s.flags.最低体力 = 11
+  s.pc.伤病 = [{ 名称: '左膝扭伤', 严重度: '轻', 起始day: 3, 已处理: true }]
+  s.ending = { type: '成功穿越', 原因: '走到了下板寺', 罚款: 5000 }
+  const vm = endingViewModel(s, createJournal())
+  assert.equal(vm.称号, '秦岭老驴')
+  assert.equal(vm.回顾.最低体力, 11)
+  assert.equal(vm.回顾.受伤次数, 1)
+  assert.equal(vm.回顾.剩余主粮, 14)
+
+  s.ending = { type: '被救援', 原因: 'x' }
+  assert.equal(endingViewModel(s, createJournal()).称号, '捡回一条命')
 })
 
 // ── parser 段落别名 ───────────────────────────────────────────────

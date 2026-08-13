@@ -1,4 +1,4 @@
-import { getNode, mainProgress } from '../data/route.js'
+import { getNode, mainProgress, ROUTE, isAdjacent } from '../data/route.js'
 import { getNpc } from '../data/npcs.js'
 import { getGear } from '../data/gear.js'
 import { activeParty } from '../engine/party.js'
@@ -20,11 +20,30 @@ export function actionsViewModel(state) {
   const 热食原因 = !炉 ? '没有炉具' : !有餐 ? '没有冻干餐' : !有气 ? '气罐见底' : ''
   const 有求救设备 = hasItem(state, 'gps') || hasItem(state, 'sat_phone')
 
+  // 下撤分叉：当前位置相邻的下撤点（水窝子→核桃坪；2800→核桃坪/嵩坪寺）。
+  // 2800 是全线最后一次容易主动放弃的地方——这组按钮就是那个「战略弹窗」，
+  // 原生实现，不经过模型。
+  const 下撤列表 = 结束 ? [] : ROUTE
+    .filter((n) => n.类型 === '下撤' && isAdjacent(state.place.nodeId, n.id))
+    .map((n) => ({ nodeId: n.id, 名称: n.名称, 文案: `下撤${n.名称}（结束本局）` }))
+
+  // 接待站补给：大爷海/大文公庙——重新摸到文明的边，可以花钱补主粮。
+  const 接待站 = ['dayehai', 'dawengongmiao'].includes(state.place.nodeId)
+  const 补给价 = 200
+
   return {
     热食: { 可用: !结束 && !!炉 && 有餐 && 有气, 原因: 热食原因, 文案: '热食 +6' },
     冷食: { 可用: !结束 && hasItem(state, 'trail_snack'), 原因: hasItem(state, 'trail_snack') ? '' : '没有路餐', 文案: '路餐 +3' },
     休整: { 可用: !结束, 原因: '', 文案: hasItem(state, 'camp_stool') ? '休整 +10（耗一个时段）' : '休整 +8（耗一个时段）' },
     求救: { 可用: !结束 && 有求救设备, 原因: 有求救设备 ? '' : '没有 GPS 信标或卫星电话', 文案: '发出求救（结束本局）' },
+    下撤列表,
+    补给: {
+      可用: !结束 && 接待站 && state.money >= 补给价,
+      原因: !接待站 ? '' : state.money < 补给价 ? `现金不足 ¥${补给价}` : '',
+      在接待站: 接待站,
+      价格: 补给价,
+      文案: `接待站补给 ¥${补给价}（主粮+4）`,
+    },
   }
 }
 

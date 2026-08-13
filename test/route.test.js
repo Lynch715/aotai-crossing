@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ROUTE, MAIN_PATH, getNode, isAdjacent } from '../src/data/route.js'
 
-test('共 24 个节点', () => {
-  assert.equal(ROUTE.length, 24)
+test('共 30 个节点（24 原表节点，飞机梁/金字塔/九重石海各拆三段）', () => {
+  assert.equal(ROUTE.length, 30)
 })
 
 test('每个节点字段齐备且类型合法', () => {

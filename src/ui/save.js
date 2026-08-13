@@ -47,7 +47,21 @@ export function migrateSave(包) {
   if (包.版本 === STATE_VERSION) {
     return { 可用: true, 迁移过: false, 包 }
   }
-  const 新 = { ...包, 版本: STATE_VERSION }
+  const 新 = JSON.parse(JSON.stringify(包))
+  // v1 → v2：飞机梁/金字塔/九重石海拆成了分段节点，老档的位置与足迹
+  // 映射到对应首段；flags 补 最低体力。不迁移的话，老档会站在一个
+  // 已经不存在的节点上，相邻判定全灭、原地卡死。
+  if (新.版本 < 2) {
+    const 改名 = { feijiliang: 'feijiliang1', jinzita: 'jinzita1', jiuchongshihai: 'jiuchongshihai1' }
+    if (新.state?.place && 改名[新.state.place.nodeId]) 新.state.place.nodeId = 改名[新.state.place.nodeId]
+    if (Array.isArray(新.journal?.已过节点)) {
+      新.journal.已过节点 = 新.journal.已过节点.map((id) => 改名[id] || id)
+    }
+    if (新.state?.flags && typeof 新.state.flags.最低体力 !== 'number') {
+      新.state.flags.最低体力 = 新.state.pc?.体力 ?? 100
+    }
+  }
+  新.版本 = STATE_VERSION
   return { 可用: true, 迁移过: true, 包: 新 }
 }
 
