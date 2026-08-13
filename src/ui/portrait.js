@@ -77,6 +77,31 @@ export function sceneCandidates(nodeId) {
   return out
 }
 
+function 打开完整场景图(src) {
+  const 弹层 = document.createElement('dialog')
+  弹层.className = 'scene-lightbox'
+
+  const 完整图 = new Image()
+  完整图.className = 'scene-lightbox-img'
+  完整图.alt = '当前路段完整场景图'
+  完整图.src = src
+
+  const 关闭 = document.createElement('button')
+  关闭.type = 'button'
+  关闭.className = 'scene-lightbox-close'
+  关闭.setAttribute('aria-label', '关闭完整场景图')
+  关闭.textContent = '×'
+  关闭.addEventListener('click', () => 弹层.close())
+
+  弹层.append(完整图, 关闭)
+  弹层.addEventListener('click', (event) => {
+    if (event.target === 弹层) 弹层.close()
+  })
+  弹层.addEventListener('close', () => 弹层.remove(), { once: true })
+  document.body.appendChild(弹层)
+  弹层.showModal()
+}
+
 export function sceneInto(容器, nodeId) {
   if (!nodeId) {
     容器.classList.remove('has-img')
@@ -95,8 +120,16 @@ export function sceneInto(容器, nodeId) {
       return
     }
     const img = new Image()
-    img.alt = ''
+    img.alt = '当前路段场景图，点击查看完整图片'
     img.className = 'scene-img'
+    img.tabIndex = 0
+    img.setAttribute('role', 'button')
+    img.addEventListener('click', () => 打开完整场景图(img.currentSrc || img.src))
+    img.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      打开完整场景图(img.currentSrc || img.src)
+    })
     img.onload = () => {
       容器.textContent = ''
       容器.appendChild(img)

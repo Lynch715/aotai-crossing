@@ -268,7 +268,9 @@ button.primary:hover:not(:disabled) { background: var(--stamp-hi); color: #fff8e
    没有对应图时整条隐藏，界面不留空洞。 */
 .scene-band {
   display: none;
-  height: 150px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 7;
   border: 4px solid #faf6ea;
   outline: 1px solid var(--line);
   border-radius: 2px;
@@ -276,6 +278,7 @@ button.primary:hover:not(:disabled) { background: var(--stamp-hi); color: #fff8e
   margin-bottom: 14px;
   box-shadow: 2px 3px 6px var(--paper-shadow);
   transform: rotate(-.3deg);
+  cursor: zoom-in;
 }
 .scene-band.has-img { display: block; }
 .scene-img {
@@ -283,6 +286,39 @@ button.primary:hover:not(:disabled) { background: var(--stamp-hi); color: #fff8e
   height: 100%;
   display: block;
   object-fit: cover;
+  object-position: 50% 50%;
+}
+
+.scene-lightbox {
+  width: min(94vw, 1200px);
+  max-width: none;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #faf6ea;
+  box-shadow: 0 18px 60px rgba(32, 29, 23, .45);
+}
+.scene-lightbox::backdrop { background: rgba(24, 23, 20, .82); }
+.scene-lightbox-img {
+  display: block;
+  width: 100%;
+  max-height: 86vh;
+  object-fit: contain;
+}
+.scene-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: 50%;
+  background: rgba(24, 23, 20, .74);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 /* 双栏布局：左侧速记栏固定，右侧日志正文伸展 */
@@ -602,7 +638,10 @@ button.primary:hover:not(:disabled) { background: var(--stamp-hi); color: #fff8e
   .game-sidebar, .sidebar { width: 100%; }
 
   .game-topbar .node-name { font-size: 18px; }
-  .scene-band { height: 110px; }
+  .scene-band {
+    height: auto;
+    aspect-ratio: 16 / 9;
+  }
 
   .item-row {
     flex-direction: column;
