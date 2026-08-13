@@ -1030,12 +1030,10 @@ function renderGame(router) {
     writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
     // 刷新面板
     APP渲染面板(state)
-    // 更新顶栏
+    // 更新顶栏与场景带。必须走 APP刷新顶栏——它内部才有「换了路段就换场景图」
+    // 的逻辑。此前这里是一段只改文字的内联代码，换了地方场景图永远不动。
+    APP刷新顶栏()
     const vm2 = gameViewModel({ state, 回合: r, 说话人: r.说话人 })
-    setText(APP节点名, vm2.顶栏.地点)
-    setText(APP时间, vm2.顶栏.时间)
-    setText(APP海拔, vm2.顶栏.海拔 + 'm')
-    setText(APP天气, vm2.顶栏.天气)
     // 结局跳转
     if (state.phase === '结局') {
       router.go('ending')

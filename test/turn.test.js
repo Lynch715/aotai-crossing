@@ -118,11 +118,29 @@ test('跨天时扣每日主粮', async () => {
   assert.equal(s.pack.find((p) => p.gearId === 'staple_food').数量, 3)
 })
 
-test('合法去向被应用，海拔跟着更新', async () => {
+test('合法去向被应用，海拔跟着更新（判定成功的徒步回合才移动）', async () => {
   const s = 局面()
-  await 跑(s, createJournal())
+  await 跑(s, createJournal(), {
+    选中项: { id: 'B', 文本: '继续走', 类型: '徒步', require: {}, cost: {} },
+  })
   assert.equal(s.place.nodeId, 'shuiwozi')
   assert.equal(s.place.海拔, 3100)
+})
+
+test('判定失败的回合不移动——横切没成怎么会已经到了对面', async () => {
+  const s = 局面()
+  // 默认选中项是必败的高危（差 22 点经验）
+  const r = await 跑(s, createJournal())
+  assert.equal(r.判定.outcome, 'fail')
+  assert.equal(s.place.nodeId, 'maijieling', '判定失败却移动了')
+})
+
+test('社交回合不移动——喂口水不该把人挪到下一个路段', async () => {
+  const s = 局面()
+  await 跑(s, createJournal(), {
+    选中项: { id: 'A', 文本: '给林晓雅递水', 类型: '社交', require: {}, cost: {} },
+  })
+  assert.equal(s.place.nodeId, 'maijieling', '社交回合却移动了')
 })
 
 test('不合法的去向被驳回，位置不动', async () => {
@@ -223,7 +241,10 @@ test('走到下板寺会触发结局并扣罚款', async () => {
   const 到终点 = 好回复.replace('"去向建议":"水窝子营地"', '"去向建议":"下板寺"')
   const s = 局面()
   s.place = { nodeId: 'tianyuandifang', 海拔: 3510 }
-  const r = await 跑(s, createJournal(), { streamImpl: 假客户端(到终点) })
+  const r = await 跑(s, createJournal(), {
+    streamImpl: 假客户端(到终点),
+    选中项: { id: 'B', 文本: '走完最后一段', 类型: '徒步', require: {}, cost: {} },
+  })
   assert.equal(r.ending.type, '成功穿越')
   assert.equal(s.phase, '结局')
   assert.equal(s.money, 4320 - 5000 < 0 ? 0 : 4320 - 5000)

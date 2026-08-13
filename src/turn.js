@@ -236,7 +236,11 @@ export async function runTurn({
     for (const f of v.伏笔.新增) addForeshadow(journal, f)
     for (const f of v.伏笔.已收) resolveForeshadow(journal, f)
 
-    if (v.去向) {
+    // 移动的两道闸：社交回合不移动（蹲下喂口水不该把人挪到下一个路段），
+    // 判定失败也不移动（横切没成怎么会已经到了对面）。模型在这两种回合
+    // 里照样爱写去向建议，校验只查相邻性管不到这层语义，得在这里拦。
+    const 允许移动 = 选中项.类型 !== '社交' && 判定.outcome === 'success'
+    if (v.去向 && 允许移动) {
       state.place.nodeId = v.去向
       state.place.海拔 = getNode(v.去向).海拔
       recordNode(journal, v.去向)
