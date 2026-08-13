@@ -84,6 +84,37 @@ export const MAIN_PATH = [
   'dawengongmiao', 'tianyuandifang', 'xiabansi',
 ]
 
+export const PLANNED_CAMPS = Object.freeze([
+  'yingdi2900', 'shuiwozi', 'yingdi2800', 'dongyuan', 'dayehai',
+])
+
+const SLOT_LEFT = Object.freeze({ 早: 3, 中: 2, 晚: 1 })
+
+// “天黑前赶到营地”不是一句氛围文案，而是一张随时可查的硬账：还剩几个
+// 行军段、今天还剩几个时段。选择休整或耗时路线后，状态会从紧迫变成赶不上，
+// 夜里只能在非营地迫降，交给睡眠/体温系统结算后果。
+export function campPressure(nodeId, slot) {
+  const id = nodeId === 'miaopu' ? 'tangkou' : nodeId
+  const i = MAIN_PATH.indexOf(id)
+  if (i < 0) return null
+
+  const 当前是计划营地 = PLANNED_CAMPS.includes(id)
+  if (当前是计划营地 && slot === '晚') {
+    const node = getNode(id)
+    return { 营地: node, 剩余路段: 0, 剩余时段: 1, 余量: 1, 状态: '已抵达' }
+  }
+
+  const campId = PLANNED_CAMPS.find((cid) => MAIN_PATH.indexOf(cid) > i)
+  if (!campId) return null
+  const 剩余路段 = MAIN_PATH.indexOf(campId) - i
+  const 剩余时段 = SLOT_LEFT[slot] || 0
+  const 余量 = 剩余时段 - 剩余路段
+  return {
+    营地: getNode(campId), 剩余路段, 剩余时段, 余量,
+    状态: 余量 > 0 ? '宽裕' : 余量 === 0 ? '紧迫' : '赶不上',
+  }
+}
+
 // 从当前主节点出发时的确定性地形加成。它与负重、海拔、天气叠加，保证
 // 火烧坡/飞机梁/金字塔/九重石海即使换了模型也保持相同的难度骨架。
 export const TRAVEL_DIFFICULTY = Object.freeze({

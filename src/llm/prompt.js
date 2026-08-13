@@ -1,4 +1,4 @@
-import { ROUTE, getNode, isAdjacent } from '../data/route.js'
+import { ROUTE, getNode, isAdjacent, campPressure } from '../data/route.js'
 import { NPCS, getNpc, PERSONALITY_TAGS } from '../data/npcs.js'
 import { GEAR, EXTRA_GEAR } from '../data/gear.js'
 import { SEASONS } from '../data/seasons.js'
@@ -154,6 +154,10 @@ export function buildUserMessage({ state, journal, 既成事实, 最近回合, �
     : ''
 
   const 性格文案 = (PERSONALITY_TAGS.find((t) => t.id === state.pc.性格) || {}).文案 || state.pc.性格
+  const 营地账 = campPressure(state.place.nodeId, state.clock.slot)
+  const 营地文案 = 营地账
+    ? `${营地账.营地.名称}｜还需 ${营地账.剩余路段} 段｜剩 ${营地账.剩余时段} 时段｜${营地账.状态}`
+    : '已进入安全尾段'
 
   // 主角块。此前 user message 里根本没有这一段——模型完全不知道玩家是谁，
   // 只在 system prompt 的范例里见过「陈岩」，于是正文里就管主角叫陈岩。
@@ -194,6 +198,7 @@ export function buildUserMessage({ state, journal, 既成事实, 最近回合, �
     '',
     '【当前状态快照】',
     `  第${state.clock.day}天 ${state.clock.slot}｜${node ? node.名称 : state.place.nodeId} ${state.place.海拔}m｜${state.weather.状态}${state.weather.等级 ? state.weather.等级 + '级' : ''}｜负重 ${state.carry.当前}kg｜现金 ¥${state.money}`,
+    `  生存状态：体温${state.pc.体温 || '正常'}｜高反${state.pc.高反 || '无'}｜今晚营地：${营地文案}`,
     `  在队：${在队 || '（独行）'}`,
     // 伤病要让模型看见——它是「已处理」提议的依据，也是剧情该惦记的事
     `  主角伤病：${(state.pc.伤病 || []).filter((w) => !w.已处理).map((w) => `${w.名称}（${w.严重度}，第${w.起始day}天起）`).join('、') || '（无）'}`,

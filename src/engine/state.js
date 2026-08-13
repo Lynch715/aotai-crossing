@@ -1,8 +1,8 @@
 import { getNode } from '../data/route.js'
 import { tierOf, getGear } from '../data/gear.js'
 
-// v3：路线压缩为 6 天决策节点；新增累计风险计数，供面板和结算使用。
-export const STATE_VERSION = 3
+// v4：体温/高反成为前端权威状态；补野外迫降与高危选择统计。
+export const STATE_VERSION = 4
 
 // 唯一权威状态。LLM 永远碰不到这个对象，只能提议；提议经 llm/validate.js 校验后由引擎应用。
 export function createInitialState(opts) {
@@ -16,7 +16,7 @@ export function createInitialState(opts) {
       名字: opts.pc.名字, 职业: opts.pc.职业, 年龄: opts.pc.年龄,
       性别: opts.pc.性别, 性格: opts.pc.性格, 外貌: opts.pc.外貌,
       技能: [...opts.pc.技能], 户外经验: opts.pc.户外经验,
-      体力: 100, 伤病: [],
+      体力: 100, 体温: '正常', 高反: '无', 伤病: [],
     },
     money: opts.金钱,
     pack: [],
@@ -27,6 +27,8 @@ export function createInitialState(opts) {
     flags: {
       已求救: false, 已下撤: false, 高海拔过夜数: 0, 失温连败: 0,
       迷路次数: 0, 恶劣天气暴露次数: 0,
+      野外迫降次数: 0, 高危尝试次数: 0, 高危成功次数: 0,
+      最重体温: 0, 最重高反: 0,
       触发过的事件id: [], 最低体力: 100,
     },
     ending: null,

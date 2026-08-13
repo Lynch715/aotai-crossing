@@ -206,6 +206,12 @@ button.primary:hover:not(:disabled) { background: var(--stamp-hi); color: #fff8e
   border-left: 3px solid var(--warn);
   color: #7a5517;
 }
+.notice.danger {
+  border: 1px solid rgba(132, 43, 33, .4);
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  background: rgba(132, 43, 33, .08);
+}
 .notice.info {
   background: rgba(92, 114, 71, .08);
   border: 1px solid rgba(92, 114, 71, .35);

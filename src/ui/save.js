@@ -79,6 +79,23 @@ export function migrateSave(包) {
       if (typeof 新.state.flags.恶劣天气暴露次数 !== 'number') 新.state.flags.恶劣天气暴露次数 = 0
     }
   }
+  // v3 → v4：补显性的体温/高反与本局统计。旧档原有的失温连败不能丢，
+  // 否则一个已经连续两夜挨冻的角色升级后会凭空痊愈。
+  if (新.版本 < 4) {
+    if (新.state) {
+      if (!新.state.pc) 新.state.pc = {}
+      if (!新.state.pc.体温) {
+        const 连败 = 新.state.flags?.失温连败 || 0
+        新.state.pc.体温 = ['正常', '发冷', '失温', '严重失温'][Math.min(3, 连败)]
+      }
+      if (!新.state.pc.高反) 新.state.pc.高反 = '无'
+      if (!新.state.flags) 新.state.flags = {}
+      const 数字字段 = ['野外迫降次数', '高危尝试次数', '高危成功次数', '最重体温', '最重高反']
+      for (const key of 数字字段) {
+        if (typeof 新.state.flags[key] !== 'number') 新.state.flags[key] = 0
+      }
+    }
+  }
   新.版本 = STATE_VERSION
   return { 可用: true, 迁移过: true, 包: 新 }
 }

@@ -13,6 +13,27 @@ const 每次热食耗气 = 8
 const 每日主粮 = 2
 
 const SLOTS = ['早', '中', '晚']
+export const 体温等级表 = Object.freeze(['正常', '发冷', '失温', '严重失温'])
+export const 高反等级表 = Object.freeze(['无', '轻度', '中度', '重度'])
+
+function 状态序号(表, value) {
+  const i = 表.indexOf(value)
+  return i < 0 ? 0 : i
+}
+
+export function 调整体温(state, delta) {
+  const i = Math.max(0, Math.min(体温等级表.length - 1, 状态序号(体温等级表, state.pc.体温) + delta))
+  state.pc.体温 = 体温等级表[i]
+  if (state.flags) state.flags.最重体温 = Math.max(state.flags.最重体温 || 0, i)
+  return state.pc.体温
+}
+
+export function 调整高反(state, delta) {
+  const i = Math.max(0, Math.min(高反等级表.length - 1, 状态序号(高反等级表, state.pc.高反) + delta))
+  state.pc.高反 = 高反等级表[i]
+  if (state.flags) state.flags.最重高反 = Math.max(state.flags.最重高反 || 0, i)
+  return state.pc.高反
+}
 
 // 适应 = 在 3000m 以上营地过夜累计 ≥1 晚。
 // 这让前两天在 2900 营地慢慢爬高有了现实意义，也让「一天冲上 3500」要付代价。
@@ -59,6 +80,9 @@ export function stepStaminaCost(state, { 行军 = true } = {}) {
   // 带伤走路更费劲。这是伤病在体力线上的唯一挂钩点——没有它，
   // 轻伤对玩家来说就只是一行字。
   cost += (state.pc.伤病 || []).filter((w) => !w.已处理).length * (行军 ? 每处未愈伤病拖累 : 1)
+  const 高反拖累 = [0, 1, 3, 6][状态序号(高反等级表, state.pc.高反)]
+  const 失温拖累 = [0, 1, 3, 7][状态序号(体温等级表, state.pc.体温)]
+  cost += 行军 ? 高反拖累 + 失温拖累 : Math.floor((高反拖累 + 失温拖累) / 2)
   return Math.max(1, cost)
 }
 
@@ -98,6 +122,9 @@ export function eatHot(state) {
 
   removeItem(state, hasItem(state, 'freeze_dried') ? 'freeze_dried' : 'extra_freeze_dried', 1)
   调整体力(state, 6)
+  // 热食不能治疗真正的失温，但能把刚开始的发冷拉回来；这让炉具与热餐
+  // 不只是另一瓶“体力药”。
+  if (state.pc.体温 === '发冷') 调整体温(state, -1)
   return true
 }
 
@@ -119,6 +146,7 @@ export function sleep(state, { 恶劣天气 = false } = {}) {
   if (条件好 && hasItem(state, 'down_jacket')) 恢复 += 3
   调整体力(state, 恢复)
 
+  const 过夜前已适应 = isAcclimatized(state)
   if (node && node.海拔 >= 适应海拔线) state.flags.高海拔过夜数 += 1
 
   // 失温判定：夜里比睡袋扛得住的还冷，就算一次失温。连续 失温连败上限 次
@@ -127,12 +155,30 @@ export function sleep(state, { 恶劣天气 = false } = {}) {
   const 季节 = getSeason(state.meta.季节)
   // 坏天气会给睡眠系统再压 5℃；硬壳+中层可抵消这层风寒，但不能替代睡袋。
   const 风寒 = 恶劣天气 && !hasAny(state, ['hardshell', 'midlayer']) ? 5 : 0
-  if (季节 && 季节.夜间温度 - 风寒 < effectiveWarmth(state)) {
+  const 夜间保暖失败 = 季节 && 季节.夜间温度 - 风寒 < effectiveWarmth(state)
+  const 野外迫降 = !node?.可扎营
+  if (夜间保暖失败) {
     state.flags.失温连败 += 1
+    调整体温(state, 恶劣天气 || 野外迫降 ? 2 : 1)
     调整体力(state, -8)
   } else {
     state.flags.失温连败 = 0
+    if (野外迫降) {
+      // 即使睡袋温标够，碎石坡、风口或狭窄山脊上的临时露宿也会让人发冷。
+      调整体温(state, 恶劣天气 ? 2 : 1)
+      调整体力(state, -6)
+    } else {
+      调整体温(state, -1)
+    }
   }
+
+  if (野外迫降) state.flags.野外迫降次数 = (state.flags.野外迫降次数 || 0) + 1
+
+  // 第一次直接睡在 3400m 以上会加重高反；有了一晚适应后，之后的正规睡眠
+  // 才能逐步缓解。下到 3000m 以下则恢复得更快。
+  if (node?.海拔 >= 高海拔线 && !过夜前已适应) 调整高反(state, 1)
+  else if (node?.海拔 < 适应海拔线) 调整高反(state, -2)
+  else if (!恶劣天气 && node?.可扎营) 调整高反(state, -1)
 
   return state
 }

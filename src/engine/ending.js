@@ -22,6 +22,12 @@ export function checkEnding(state) {
   if ((state.flags.失温连败 || 0) >= 失温连败上限) {
     return { type: '失败遇险', 原因: '连续失温，体温再也提不上来' }
   }
+  if (state.pc.体温 === '严重失温') {
+    return { type: '失败遇险', 原因: '严重失温，已经无法继续行动' }
+  }
+  if (state.pc.高反 === '重度' && state.place.海拔 >= 3400) {
+    return { type: '失败遇险', 原因: '重度高反，在高海拔无法继续行动' }
+  }
 
   if (state.flags.已求救) {
     return { type: '被救援', 原因: '发出了求救信号，等来了救援队' }

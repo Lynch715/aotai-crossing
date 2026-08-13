@@ -1,4 +1,4 @@
-import { getNode, mainProgress, ROUTE, isAdjacent } from '../data/route.js'
+import { getNode, mainProgress, campPressure, ROUTE, isAdjacent } from '../data/route.js'
 import { getNpc } from '../data/npcs.js'
 import { getGear } from '../data/gear.js'
 import { activeParty } from '../engine/party.js'
@@ -63,10 +63,13 @@ export function panelViewModel(state) {
     性别: state.pc.性别,
     户外经验: state.pc.户外经验,
     体力: state.pc.体力,
+    体温: state.pc.体温 || '正常',
+    高反: state.pc.高反 || '无',
     体力告警: state.pc.体力 < GAME_体力告警线,
     负重: { 当前: state.carry.当前, 上限: state.carry.上限, 比: Math.min(1, 比), 档 },
     现金: state.money,
     营地: { 可扎营: !!node?.可扎营, 有水源: !!node?.有水源 },
+    营地压力: campPressure(state.place.nodeId, state.clock.slot),
     伤病: (state.pc.伤病 || []).filter((w) => !w.已处理),
     风险: {
       迷路次数: state.flags?.迷路次数 || 0,

@@ -25,17 +25,37 @@ function 最高节点(journal) {
   return 最高 ? { 名称: 最高.名称, 海拔: 最高.海拔 } : null
 }
 
-// 结算称号：一句话给这一局定性。数字之外要有一个能记住、能跟朋友说的词。
-function 称号of(state) {
+function 剩余主粮of(state) {
+  return (state.pack || [])
+    .filter((p) => p.gearId === 'staple_food' || p.gearId === 'extra_staple')
+    .reduce((s, p) => s + p.数量, 0)
+}
+
+// 同一种结局也应留下不同的个人故事。称号只读取引擎记下来的硬事实，
+// 不让模型临场编一个“毫发无伤”却同时显示受伤 3 次。
+function 称号列表of(state) {
   const t = state.ending?.type
+  const out = []
   if (t === '成功穿越') {
-    if (state.clock.day <= 6) return '秦岭老驴'
-    if (state.clock.day <= 9) return '稳扎稳打的完成者'
-    return '磨出来的胜利'
+    if (state.clock.day <= 6) out.push('秦岭老驴')
+    else if (state.clock.day <= 9) out.push('稳扎稳打的完成者')
+    else out.push('磨出来的胜利')
+    if (!(state.pc.伤病 || []).length) out.push('毫发无伤')
+    if (剩余主粮of(state) === 0) out.push('最后一口粮')
+    if ((state.party || []).length >= 2 && state.party.every((p) => p.在队)) out.push('队长')
+    if (!(state.party || []).some((p) => p.在队)) out.push('独行者')
+    if ((state.flags?.高危成功次数 || 0) >= 3) out.push('赌徒')
+    if ((state.flags?.迷路次数 || 0) === 0) out.push('山里人')
+    if ((state.flags?.最低体力 ?? 100) <= 15) out.push('命悬一线')
+  } else if (t === '主动下撤') {
+    out.push('知难而退')
+    if ((state.party || []).every((p) => p.在队)) out.push('全员平安')
+  } else if (t === '被救援') {
+    out.push('捡回一条命')
+  } else {
+    out.push('山把你留下了')
   }
-  if (t === '主动下撤') return '知进退的明白人'
-  if (t === '被救援') return '捡回一条命'
-  return '山把你留下了'
+  return [...new Set(out)].slice(0, 6)
 }
 
 export function endingViewModel(state, journal) {
@@ -47,6 +67,7 @@ export function endingViewModel(state, journal) {
     标题: '这一局结束了', 定性: '生还', 说明: state.ending.原因 || '',
   }
 
+  const 称号列表 = 称号列表of(state)
   return {
     type: state.ending.type,
     标题: 文案.标题,
@@ -54,16 +75,20 @@ export function endingViewModel(state, journal) {
     说明: 文案.说明,
     原因: state.ending.原因 || '',
     罚款: state.ending.type === '成功穿越' ? FINE_AMOUNT : 0,
-    称号: 称号of(state),
+    称号: 称号列表[0] || '',
+    称号列表,
     回顾: {
       天数: state.clock.day,
       最低体力: state.flags?.最低体力 ?? null,
       受伤次数: (state.pc.伤病 || []).length,
       迷路次数: state.flags?.迷路次数 || 0,
       恶劣天气暴露次数: state.flags?.恶劣天气暴露次数 || 0,
-      剩余主粮: (state.pack || [])
-        .filter((p) => p.gearId === 'staple_food' || p.gearId === 'extra_staple')
-        .reduce((s, p) => s + p.数量, 0),
+      野外迫降次数: state.flags?.野外迫降次数 || 0,
+      最重体温: ['正常', '发冷', '失温', '严重失温'][state.flags?.最重体温 || 0],
+      最重高反: ['无', '轻度', '中度', '重度'][state.flags?.最重高反 || 0],
+      高危成功: state.flags?.高危成功次数 || 0,
+      高危尝试: state.flags?.高危尝试次数 || 0,
+      剩余主粮: 剩余主粮of(state),
       最高点: 最高节点(journal),
       节点: (journal.已过节点 || []).map((id) => {
         const n = getNode(id)

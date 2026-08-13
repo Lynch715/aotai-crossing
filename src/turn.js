@@ -1,7 +1,7 @@
 import { snapshot, restore, consumeItem, hasItem } from './engine/state.js'
 import { makeRng } from './engine/rng.js'
 import { judgeOption, gapFor } from './engine/threshold.js'
-import { applyStepCost, advanceSlot, settleOvernight, stepStaminaCost, 调整体力 } from './engine/consume.js'
+import { applyStepCost, advanceSlot, settleOvernight, stepStaminaCost, 调整体力, 调整体温, 调整高反 } from './engine/consume.js'
 import { applyAffinityDelta, initialAffinity } from './engine/affinity.js'
 import { npcLeaves, npcJoins } from './engine/party.js'
 import { checkEnding, applyEnding } from './engine/ending.js'
@@ -63,32 +63,85 @@ export function ensureProgressOption(options, state) {
   return out
 }
 
-function applyTravelRisks(state, 选中项, 判定, rng) {
+function 新增路段伤病(state, 名称, 严重度, notes) {
+  if ((state.pc.伤病 || []).some((w) => w.名称 === 名称 && !w.已处理)) return false
+  state.pc.伤病.push({ 名称, 严重度, 起始day: state.clock.day, 已处理: false })
+  notes.push(`${名称}（${严重度}伤），后续行军会额外消耗体力`)
+  return true
+}
+
+export function applyTravelRisks(state, 选中项, 判定, rng, 目标节点 = null) {
   const notes = []
-  if (选中项.类型 === '社交' || 判定.outcome !== 'success') return { 迷路: false, notes }
+  let 受伤 = false
+  if (选中项.类型 === '社交' || 判定.outcome !== 'success') return { 迷路: false, 受伤, notes }
+
+  const 出发id = state.place.nodeId
+  const 有绳索保护 = hasItem(state, 'rope') && hasItem(state, 'harness')
 
   if ((state.weather?.等级 ?? 0) >= 6) {
     state.flags.恶劣天气暴露次数 = (state.flags.恶劣天气暴露次数 || 0) + 1
     notes.push('恶劣天气中行军，体力消耗增加')
   }
 
-  if (state.place.海拔 >= 3400 && !state.flags.高海拔过夜数 &&
-      !(state.pc.伤病 || []).some((w) => w.名称 === '高反不适' && !w.已处理) && rng() < 0.25) {
-    state.pc.伤病.push({ 名称: '高反不适', 严重度: '轻', 起始day: state.clock.day, 已处理: false })
-    notes.push('快速升高后出现高反不适，后续行军更吃力')
+  const 目标海拔 = 目标节点?.海拔 ?? state.place.海拔
+  const 快速拔高 = 目标海拔 - state.place.海拔 >= 400
+  if (目标海拔 >= 3400 && !state.flags.高海拔过夜数 && rng() < (快速拔高 ? 0.50 : 0.30)) {
+    const 高反 = 调整高反(state, 1)
+    notes.push(`快速升高后出现${高反}高反，后续行军更吃力`)
   }
 
-  if (state.place.nodeId === 'wanxianzhen') {
+  // 麦秸岭：危险来自刀刃横切和滑坠，不再只是再扣一截“万能体力”。
+  if (出发id === 'maijieling') {
+    const chance = 有绳索保护 ? 0.08 : hasItem(state, 'trekking_poles') ? 0.20 : 0.34
+    if (rng() < chance) {
+      受伤 = 新增路段伤病(state, '麦秸岭滑坠伤', (state.weather?.等级 ?? 0) >= 6 && !有绳索保护 ? '重' : '轻', notes) || 受伤
+    }
+  }
+
+  // 飞机梁：核心是连续石梁把人榨干；坏天气下还会持续吹冷。
+  if (出发id.startsWith('feijiliang')) {
+    调整体力(state, -4)
+    notes.push('飞机梁连续攀爬，额外消耗体力 4')
+    if ((state.weather?.等级 ?? 0) >= 5) {
+      notes.push(`风口暴露使体温降到${调整体温(state, 1)}`)
+    }
+  }
+
+  // 金字塔：不稳巨石与攀爬失手。成套绳索会显著降低受伤率。
+  if (出发id.startsWith('jinzita')) {
+    const chance = 有绳索保护 ? 0.10 : 0.36
+    if (rng() < chance) {
+      受伤 = 新增路段伤病(state, '金字塔攀爬伤', state.pc.体力 < 30 && !有绳索保护 ? '重' : '轻', notes) || 受伤
+    }
+  }
+
+  // 九重石海：全线体力 Boss，同时考验脚踝和膝盖保护。
+  if (出发id.startsWith('jiuchongshihai')) {
+    调整体力(state, -6)
+    notes.push('九重石海持续拔高，额外消耗体力 6')
+    const 有腿部保护 = hasItem(state, 'trekking_poles') || hasItem(state, 'knee_brace')
+    if (rng() < (有腿部保护 ? 0.14 : 0.38)) {
+      受伤 = 新增路段伤病(state, '石海崴伤', state.pc.体力 < 25 ? '重' : '轻', notes) || 受伤
+    }
+  }
+
+  if (出发id === 'wanxianzhen') {
     const 有定位 = hasItem(state, 'gps') || hasItem(state, 'map_compass')
     const chance = 有定位 ? 0.05 : ((state.weather?.等级 ?? 0) >= 4 ? 0.55 : 0.35)
     if (rng() < chance) {
       state.flags.迷路次数 = (state.flags.迷路次数 || 0) + 1
       调整体力(state, -8)
       notes.push('在万仙阵偏离路线，额外耗费体力，本回合未能推进')
-      return { 迷路: true, notes }
+      return { 迷路: true, 受伤, notes }
+    }
+    // 主路径把雷公庙、东跑马梁作为这一决策段里的子地点；没有这条硬结算，
+    // “跑马梁主打天气”就只剩模型一句形容词。
+    if ((state.weather?.等级 ?? 0) >= 4) {
+      const 降温级 = (state.weather?.等级 ?? 0) >= 7 ? 2 : 1
+      notes.push(`东跑马梁风雨暴露，体温降到${调整体温(state, 降温级)}`)
     }
   }
-  return { 迷路: false, notes }
+  return { 迷路: false, 受伤, notes }
 }
 
 // 连模型重写一次都还是没有正文时的最后保底。宁可平淡，不许空白——
@@ -176,11 +229,21 @@ export async function runTurn({
     // 时段推进：先走时钟，但把跨夜结算延后到“实际移动完成”之后。旧顺序会在
     // 麦秸岭先睡一晚，再把位置挪到水窝子——玩家看起来就像跳过了营地。
     const 推进备注 = []
-    const 路险 = 强制营地夜 ? { 迷路: false, notes: [] } : applyTravelRisks(state, 选中项, 判定, 回合rng)
-    推进备注.push(...路险.notes)
-    const 预计去向 = !强制营地夜 && 行军 && 判定.outcome === 'success' && !路险.迷路
+    const 初步去向 = !强制营地夜 && 行军 && 判定.outcome === 'success'
       ? (选中项.targetNodeId ? getNode(选中项.targetNodeId) : nextMainNode(state.place.nodeId))
       : null
+    const 路险 = 强制营地夜 ? { 迷路: false, 受伤: false, notes: [] } : applyTravelRisks(state, 选中项, 判定, 回合rng, 初步去向)
+    推进备注.push(...路险.notes)
+    if (路险.受伤) {
+      const w = state.pc.伤病[state.pc.伤病.length - 1]
+      if (w) recordEvent(journal, state.clock, `${state.pc.名字}${w.严重度 === '重' ? '重伤' : '受伤'}：${w.名称}`)
+    }
+    const 预计去向 = !路险.迷路 ? 初步去向 : null
+
+    if (选中项.类型 === '高危') {
+      state.flags.高危尝试次数 = (state.flags.高危尝试次数 || 0) + 1
+      if (判定.outcome === 'success') state.flags.高危成功次数 = (state.flags.高危成功次数 || 0) + 1
+    }
     const 推进次数 = 1 + (typeof 净代价.时段 === 'number' ? Math.max(0, Math.floor(净代价.时段)) : 0)
     let 待结算夜数 = 0
     for (let i = 0; i < 推进次数; i++) {
@@ -273,6 +336,7 @@ export async function runTurn({
       ok: true, 降级: false, 判定,
       标题: parsed.标题, 剧情: parsed.剧情, 万象: parsed.万象,
       选项: parsed.选项, warnings: [...parsed.errors], ending: null, 原文: 最终原文,
+      生存提示: [...路险.notes],
       finish: finish ?? null, reasoning: reasoning ?? 0,
     }
 
@@ -282,8 +346,11 @@ export async function runTurn({
       跨夜已结算 = true
       for (let i = 0; i < 待结算夜数; i++) {
         const r = settleOvernight(state)
-        if (r.欠缺 > 0) 结果.warnings.push(`断粮：少吃了 ${r.欠缺} 份主粮，体力额外受损`)
-        if (state.flags.失温连败 > 0) 结果.warnings.push(`夜里睡袋扛不住低温，出现失温征兆（连续 ${state.flags.失温连败} 晚）`)
+        if (r.欠缺 > 0) 结果.生存提示.push(`断粮：少吃了 ${r.欠缺} 份主粮，体力额外受损`)
+        if ((state.flags.野外迫降次数 || 0) > 0 && !getNode(state.place.nodeId)?.可扎营) {
+          结果.生存提示.push(`没能赶到营地，被迫在${getNode(state.place.nodeId)?.名称 || '山路'}露宿`)
+        }
+        if (state.flags.失温连败 > 0) 结果.生存提示.push(`夜里保暖失败，体温降到${state.pc.体温}（连续 ${state.flags.失温连败} 晚）`)
       }
     }
 
@@ -328,7 +395,7 @@ export async function runTurn({
     }
     // 伤病：新伤入册（起始day 用于「重伤拖 2 天致死」的结局判定），
     // 处理旧伤要消耗医药包耗材——validate 已确认包里有医药包。
-    for (const w of v.伤病新增) {
+    for (const w of (路险.受伤 ? [] : v.伤病新增)) {
       state.pc.伤病.push({ 名称: w.名称, 严重度: w.严重度, 起始day: state.clock.day, 已处理: false })
       recordEvent(journal, state.clock, `${state.pc.名字}${w.严重度 === '重' ? '重伤' : '受伤'}：${w.名称}`)
     }

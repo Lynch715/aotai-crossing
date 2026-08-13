@@ -64,7 +64,7 @@ test('最终好感按高到低排，带分级标签', () => {
   const vm = endingViewModel(s, j)
   assert.equal(vm.回顾.好感[0].名称, '陈岩')
   assert.equal(vm.回顾.好感[0].好感, 72)
-  assert.ok(vm.回顾.好感[0].分级.includes('爱慕'), `72 应是爱慕档：${vm.回顾.好感[0].分级}`)
+  assert.equal(vm.回顾.好感[0].分级, '信任')
 })
 
 test('没有结局时返回 null，而不是编一个出来', () => {

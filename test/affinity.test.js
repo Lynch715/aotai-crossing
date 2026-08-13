@@ -17,24 +17,24 @@ test('夹取到 0-100', () => {
 })
 
 test('分级标签覆盖每个区间，边界归属正确', () => {
-  assert.equal(affinityLabel(0), '冷淡')
-  assert.equal(affinityLabel(19), '冷淡')
-  assert.equal(affinityLabel(20), '面熟')
-  assert.equal(affinityLabel(39), '面熟')
+  assert.equal(affinityLabel(0), '排斥')
+  assert.equal(affinityLabel(19), '排斥')
+  assert.equal(affinityLabel(20), '生疏')
+  assert.equal(affinityLabel(39), '生疏')
   assert.equal(affinityLabel(40), '搭伙')
   assert.equal(affinityLabel(59), '搭伙')
   assert.equal(affinityLabel(60), '信任')
-  assert.equal(affinityLabel(69), '信任')
-  assert.equal(affinityLabel(70), '爱慕')
-  assert.equal(affinityLabel(89), '爱慕')
-  assert.equal(affinityLabel(90), '深爱')
-  assert.equal(affinityLabel(99), '深爱')
-  assert.equal(affinityLabel(100), '至死不渝')
+  assert.equal(affinityLabel(79), '信任')
+  assert.equal(affinityLabel(80), '生死之交')
+  assert.equal(affinityLabel(94), '生死之交')
+  assert.equal(affinityLabel(95), '托付性命')
+  assert.equal(affinityLabel(100), '托付性命')
 })
 
-test('文档明写的两个刻度对得上', () => {
-  assert.equal(affinityLabel(70), '爱慕')
-  assert.equal(affinityLabel(100), '至死不渝')
+test('高好感使用生存关系称谓，不混入爱情词', () => {
+  assert.equal(affinityLabel(70), '信任')
+  assert.equal(affinityLabel(100), '托付性命')
+  for (const v of [70, 80, 95, 100]) assert.ok(!/爱慕|深爱|至死不渝/.test(affinityLabel(v)))
 })
 
 test('普通变化夹到 ±5', () => {
@@ -77,9 +77,9 @@ test('对不在队的人不生效', () => {
   assert.equal(s.party[0].好感, 62)
 })
 
-test('分级标签先夹取再查表，越界值不会静默变成冷淡', () => {
-  assert.equal(affinityLabel(150), '至死不渝')
-  assert.equal(affinityLabel(-5), '冷淡')
+test('分级标签先夹取再查表，越界值不会静默变成排斥', () => {
+  assert.equal(affinityLabel(150), '托付性命')
+  assert.equal(affinityLabel(-5), '排斥')
 })
 
 test('应用失败时返回同样的键，不让调用方静默拿到 undefined', () => {

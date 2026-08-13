@@ -1092,8 +1092,11 @@ function renderGame(router) {
     // 更新说话人 / 舞台
     APP渲染舞台(state, r.说话人 || null)
 
-    // 更新万象
-    APP渲染万象(r.万象)
+    // 生存硬结算必须直接给玩家看，不能只塞给模型指望它顺手写进剧情。
+    APP渲染万象([
+      ...(r.生存提示 || []).map((x) => `生存结算｜${x}`),
+      ...(r.万象 || []),
+    ])
 
     // 写自动存档
     writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
@@ -1165,6 +1168,17 @@ function renderPanel(vm) {
   APP体力条容器.appendChild(APP体力条)
   APP面板.appendChild(APP体力条容器)
 
+  // 体温与高反是离散生存状态，不伪装成两根精确到个位的血条。
+  for (const [标签, 值, 危险] of [
+    ['体温', vm.体温, ['失温', '严重失温'].includes(vm.体温)],
+    ['高反', vm.高反, ['中度', '重度'].includes(vm.高反)],
+  ]) {
+    const 行 = el('div', { class: 'game-stat-row', style: 'margin-top:6px' })
+    行.appendChild(el('span', { class: 'game-stat-label', text: 标签 }))
+    行.appendChild(el('span', { class: 危险 ? 'game-stat-val danger' : (值 === '正常' || 值 === '无' ? 'game-stat-val' : 'game-stat-val warn'), text: 值 }))
+    APP面板.appendChild(行)
+  }
+
   // 负重
   const APP负重行 = el('div', { class: 'game-stat-row', style: 'margin-top:8px' })
   const APP负重标签 = el('span', { class: 'game-stat-label' })
@@ -1204,6 +1218,15 @@ function renderPanel(vm) {
     text: vm.营地.可扎营 ? (vm.营地.有水源 ? '可扎营 · 有水' : '可扎营 · 无水') : '此处不可扎营',
   }))
   APP面板.appendChild(APP营地行)
+
+  if (vm.营地压力) {
+    const p = vm.营地压力
+    const cls = p.状态 === '赶不上' ? 'notice danger' : p.状态 === '紧迫' ? 'notice warn' : 'muted'
+    const 文案 = p.状态 === '已抵达'
+      ? `今晚营地：${p.营地.名称}（已抵达，必须扎营过夜）`
+      : `今晚营地：${p.营地.名称}｜还需${p.剩余路段}段／剩${p.剩余时段}时段｜${p.状态}${p.状态 === '赶不上' ? '，将被迫野外露宿' : ''}`
+    APP面板.appendChild(el('div', { class: cls, style: 'margin-top:8px', text: 文案 }))
+  }
 
   if (vm.伤病.length) {
     const APP伤病行 = el('div', { class: 'notice warn', style: 'margin-top:8px' })
@@ -1328,12 +1351,18 @@ function renderEnding(router) {
   const APP风险回顾 = el('div', { class: 'recap-item' })
   setText(APP风险回顾, `迷路：${vm.回顾.迷路次数} 次 · 恶劣天气暴露：${vm.回顾.恶劣天气暴露次数} 次`)
   APP基本回顾.appendChild(APP风险回顾)
+  const APP露宿回顾 = el('div', { class: 'recap-item' })
+  setText(APP露宿回顾, `野外迫降：${vm.回顾.野外迫降次数} 次 · 最重体温：${vm.回顾.最重体温} · 最重高反：${vm.回顾.最重高反}`)
+  APP基本回顾.appendChild(APP露宿回顾)
+  const APP高危回顾 = el('div', { class: 'recap-item' })
+  setText(APP高危回顾, `高危选择：成功 ${vm.回顾.高危成功} / 尝试 ${vm.回顾.高危尝试}`)
+  APP基本回顾.appendChild(APP高危回顾)
   const APP余粮行 = el('div', { class: 'recap-item' })
   setText(APP余粮行, '剩余主粮：' + vm.回顾.剩余主粮 + ' 份')
   APP基本回顾.appendChild(APP余粮行)
-  if (vm.称号) {
+  if (vm.称号列表?.length) {
     const APP称号行 = el('div', { class: 'recap-item recap-peak' })
-    setText(APP称号行, '评价：「' + vm.称号 + '」')
+    setText(APP称号行, '本局称号：' + vm.称号列表.map((x) => `「${x}」`).join(' '))
     APP基本回顾.appendChild(APP称号行)
   }
 
