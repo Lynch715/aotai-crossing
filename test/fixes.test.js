@@ -347,6 +347,16 @@ test('有上文时 user message 带续写指令，没上文时不带', () => {
   assert.ok(!无.includes('必须从上面最后一回合的结尾处继续写'), '没上文不该有续写指令')
 })
 
+test('叙事人称统一为第二人称：叙述用「你」，禁止用名字或「我」叙事', () => {
+  const sys = buildSystemPrompt()
+  assert.ok(sys.includes('叙事人称铁律'))
+  assert.ok(sys.includes('一律用第二人称「你」'))
+  const s = 局面()
+  const m = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: [] })
+  assert.ok(m.includes('不要用「周野」叙事'), '主角块应明确禁止名字叙事')
+  assert.ok(m.includes('只有对话里其他人可以喊「周野」'), '应放行对话内称名')
+})
+
 test('system prompt 有连贯性与选项扣题的硬规则', () => {
   const sys = buildSystemPrompt()
   assert.ok(sys.includes('连贯性'), '缺连贯性一节')
