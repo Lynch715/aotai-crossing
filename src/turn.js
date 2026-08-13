@@ -115,12 +115,30 @@ export async function runTurn({
     })
 
     let parsed = parseTurn(text)
+    let 最终原文 = text
+
+    // —— 正文彻底缺失就整回合重写一次 ——
+    // 解析层能从散落文本里回收漏标记的正文；走到这里还是空，说明模型真的
+    // 一个字正文都没写（只给了万象/选项/STATE）。这不是格式问题而是内容
+    // 缺失，只补尾段救不回来——重发完整请求一次，两次都空才认命。
+    if (!parsed.剧情.trim()) {
+      const 重写 = await streamImpl({
+        config, onDelta, signal,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      })
+      const 再解析 = parseTurn(重写.text)
+      if (再解析.剧情.trim()) {
+        parsed = 再解析
+        最终原文 = 重写.text
+        parsed.errors.push('第一次回复没有正文，已整回合重写')
+      }
+    }
 
     // —— 尾段崩了就补救：只重发尾段，不重写正文 ——
     let 补救次数 = 0
     while (parsed.state === null && 补救次数 < MAX_REPAIR) {
       补救次数++
-      const 已生成正文 = text
+      const 已生成正文 = 最终原文
       const 补救 = await streamImpl({
         config, signal,
         messages: [
@@ -138,7 +156,7 @@ export async function runTurn({
     const 结果 = {
       ok: true, 降级: false, 判定,
       标题: parsed.标题, 剧情: parsed.剧情, 万象: parsed.万象,
-      选项: parsed.选项, warnings: [...parsed.errors], ending: null, 原文: text,
+      选项: parsed.选项, warnings: [...parsed.errors], ending: null, 原文: 最终原文,
       finish: finish ?? null, reasoning: reasoning ?? 0,
     }
 

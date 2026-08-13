@@ -333,6 +333,28 @@ test('段落别名：[万象] 与 [选项] 也认', () => {
   assert.equal(r.选项.length, 1)
 })
 
+test('漏写 [剧情] 标记时，从散落文本回收正文，不再一片空白', () => {
+  const r = parseTurn('陈岩把杖插进碎石里，试了试才敢下脚。\n\n[鳌太万象]\n1. 乙\n\n[下回选项]\nA. 丙\n\n<<<STATE>>>\n{}')
+  assert.ok(r.剧情.includes('陈岩'), `正文被丢弃了：「${r.剧情}」`)
+  assert.equal(r.选项.length, 1)
+  assert.deepEqual(r.万象, ['乙'])
+})
+
+test('模型一个字正文都没写时，整回合重写一次', async () => {
+  const s = 局面()
+  const 无正文 = '[鳌太万象]\n1. 乙\n\n[下回选项]\nA. 丙\n\n<<<STATE>>>\n{}'
+  const 有正文 = '[剧情]\n重写后的正文\n\n[下回选项]\nA. 丙\n\n<<<STATE>>>\n{}'
+  let 调用 = 0
+  const r = await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '走', 类型: '徒步', require: {}, cost: {} },
+    config: 假配置,
+    streamImpl: async () => ({ text: [无正文, 有正文][Math.min(调用++, 1)] }),
+  })
+  assert.equal(调用, 2, '应重写一次')
+  assert.ok(r.剧情.includes('重写后的正文'))
+})
+
 test('以段落名开头的正文行不会被误吃成标记', () => {
   const r = parseTurn('[剧情]\n选项摆在眼前，你却在想别的。\n\n[下回选项]\nA. 丙\n\n<<<STATE>>>\n{}')
   assert.ok(r.剧情.includes('选项摆在眼前'), `正文被吃掉了：${r.剧情}`)
