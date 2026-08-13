@@ -622,7 +622,8 @@ function renderGame(router) {
   }
   APP右栏.appendChild(APP舞台)
 
-  // 错误提示位（回合出错时填入）
+  // 错误提示位（回合出错、降级诊断时填入）。
+  // 挂在选项之后——诊断是给想深究的人看的，不能横在剧情前面打断阅读。
   const APP错误位 = el('div')
 
   // 剧情区
@@ -633,7 +634,6 @@ function renderGame(router) {
   APP剧情区.appendChild(APP载入位)
   APP剧情区.appendChild(APP剧情标题)
   APP剧情区.appendChild(APP剧情正文)
-  APP右栏.appendChild(APP错误位)
   APP右栏.appendChild(APP剧情区)
 
   // 万象区
@@ -643,6 +643,7 @@ function renderGame(router) {
   // 选项区
   const APP选项区 = el('div', { class: 'options-area' })
   APP右栏.appendChild(APP选项区)
+  APP右栏.appendChild(APP错误位)
 
   // 原生行动区（进食/休整/求救——不经过模型的操作）
   const APP行动区 = el('div', { class: 'game-controls' })

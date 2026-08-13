@@ -278,6 +278,31 @@ test('去向建议填当前所在地 = 原地不动，静默忽略、零警告',
   assert.equal(v.warnings.length, 0, `不该有警告：${v.warnings}`)
 })
 
+// ── 夹取是护栏日常，不是要给玩家看的警告 ──────────────────────────
+
+test('门槛/代价越界只进 微调，不进玩家可见的 warnings', () => {
+  const v = validateProposal(局面(), {
+    选项: [{ id: 'A', 类型: '徒步', require: { 经验: 15 }, cost: { 体力: 99 } }],
+  })
+  assert.equal(v.选项[0].require.经验, 20, '仍要夹取')
+  assert.equal(v.warnings.length, 0, `夹取不该出现在 warnings：${v.warnings}`)
+  assert.ok(v.微调.length >= 2, '夹取记录应进 微调')
+})
+
+// ── 开场回合有专门指引，不再两行白描甩四个选项 ────────────────────
+
+test('第一回合的 user message 带开场指引，之后的回合不带', () => {
+  const s = 局面()
+  const 空档案 = createJournal()
+  const m1 = buildUserMessage({ state: s, journal: 空档案, 既成事实: { 选择: 'start 出发上路！', 判定: '成功', 已结算: 'x' }, 最近回合: [] })
+  assert.ok(m1.includes('【开场回合】'), '开场回合缺指引')
+
+  const 有事档案 = createJournal()
+  有事档案.关键事件.push({ day: 1, slot: '早', 文本: 'x' })
+  const m2 = buildUserMessage({ state: s, journal: 有事档案, 既成事实: {}, 最近回合: [] })
+  assert.ok(!m2.includes('【开场回合】'), '非开场回合不该带指引')
+})
+
 // ── 装备中文名解析：模型只见过中文名，不能因此每回合弹警告 ────────
 
 test('resolveGear 认 id、认全名、认唯一命中的简称，拒绝歧义', () => {

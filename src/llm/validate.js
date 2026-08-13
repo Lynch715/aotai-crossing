@@ -128,7 +128,10 @@ const 合法严重度 = new Set(['轻', '重'])
 
 // 把 LLM 的 STATE 提议过一遍筛子。所有越权都记 warning，但不打断——游戏要能继续。
 export function validateProposal(state, proposal) {
-  const out = { 好感变更: [], 说话人: null, 离队: [], 入队: [], 伤病新增: [], 伤病已处理: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
+  // warnings 是给玩家看的「真拦截」；微调 是护栏的日常工作（门槛/代价夹取），
+  // 只进调试信息。混在一起的话，模型报个「经验:15」被夹到 20 这种鸡毛蒜皮
+  // 也会让界面弹「本回合有 1 处提议被拦下」——狼来了喊多了，真警告没人看。
+  const out = { 好感变更: [], 说话人: null, 离队: [], 入队: [], 伤病新增: [], 伤病已处理: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [], 微调: [] }
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return out
   // 「从不抛异常」得对 state 也成立，否则调用方传进半截状态时一样白屏。
   const 队伍 = Array.isArray(state?.party) ? state.party : []
@@ -293,7 +296,12 @@ export function validateProposal(state, proposal) {
     }
     const { require, warnings } = clampRequire(opt.类型, opt.require)
     const { cost, warnings: cw } = clampCost(opt.cost)
-    out.warnings.push(...warnings, ...cw)
+    // 夹取是常态不是事故：数值收进 微调，只有「引用不存在的物品/人物」
+    // 这类真问题才留在 warnings 里露脸
+    for (const w of [...warnings, ...cw]) {
+      if (w.includes('越界，夹到')) out.微调.push(w)
+      else out.warnings.push(w)
+    }
     out.选项.push({ id, 类型: opt.类型 || '徒步', require, cost })
   }
 

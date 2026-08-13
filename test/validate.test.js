@@ -140,10 +140,11 @@ test('代价被夹取：负值归零，超限截断，未知项剔除', () => {
   assert.ok(warnings.length >= 4)
 })
 
-test('选项里的代价同样过夹取', () => {
+test('选项里的代价同样过夹取（夹取记录进 微调，不打扰玩家）', () => {
   const r = validateProposal(状态(), { 选项: [{ id: 'A', 类型: '徒步', cost: { 体力: -20 } }] })
   assert.equal(r.选项[0].cost.体力, 0)
-  assert.ok(r.warnings.some((w) => w.includes('体力')))
+  assert.ok(r.微调.some((w) => w.includes('体力')), `实得 微调: ${r.微调}`)
+  assert.equal(r.warnings.length, 0, '夹取不该出现在玩家可见的 warnings')
 })
 
 test('非数字的好感门槛会报 warning，不静默丢弃', () => {
