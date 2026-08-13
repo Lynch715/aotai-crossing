@@ -41,13 +41,14 @@ body {
   color: var(--ink);
   font: 15px/1.8 "Kaiti SC", "STKaiti", "KaiTi", "TW-Kai", "PingFang SC", "Microsoft YaHei", serif;
   background-color: var(--paper);
-  /* 等高线暗纹：纯 CSS 内嵌 SVG，没有任何外部依赖。
-     若 assets/bg/paper.jpg 存在（可自制纸纹图，见 assets/scenes/说明.md），
-     会叠在最上层。 */
+  /* 两层底纹：等高线（内嵌 SVG，透明底）在上，纸纹理照片在下。
+     顺序不能反——CSS 多重背景第一层在最上，JPG 不透明，
+     纸纹在上面会把等高线整个盖掉。
+     assets/bg/paper.jpg 缺失时就只剩等高线 + 底色，同样成立。 */
   background-image:
-    url('assets/bg/paper.jpg'),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='420' viewBox='0 0 420 420'%3E%3Cg fill='none' stroke='%23bfae87' stroke-opacity='.35' stroke-width='1.1'%3E%3Cpath d='M-20 80 C 80 20, 180 140, 300 70 S 460 110, 460 110'/%3E%3Cpath d='M-20 130 C 90 70, 190 190, 310 120 S 470 160, 470 160'/%3E%3Cpath d='M-20 300 C 70 240, 200 360, 320 290 S 470 330, 470 330'/%3E%3Cpath d='M-20 350 C 80 290, 210 410, 330 340 S 480 380, 480 380'/%3E%3C/g%3E%3C/svg%3E");
-  background-size: 512px, 420px;
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='420' viewBox='0 0 420 420'%3E%3Cg fill='none' stroke='%23bfae87' stroke-opacity='.35' stroke-width='1.1'%3E%3Cpath d='M-20 80 C 80 20, 180 140, 300 70 S 460 110, 460 110'/%3E%3Cpath d='M-20 130 C 90 70, 190 190, 310 120 S 470 160, 470 160'/%3E%3Cpath d='M-20 300 C 70 240, 200 360, 320 290 S 470 330, 470 330'/%3E%3Cpath d='M-20 350 C 80 290, 210 410, 330 340 S 480 380, 480 380'/%3E%3C/g%3E%3C/svg%3E"),
+    url('assets/bg/paper.jpg');
+  background-size: 420px, 512px;
 }
 
 #app { max-width: 1080px; margin: 0 auto; padding: 22px 18px 64px; }
