@@ -355,6 +355,23 @@ test('模型一个字正文都没写时，整回合重写一次', async () => {
   assert.ok(r.剧情.includes('重写后的正文'))
 })
 
+test('模型两次都没写正文 → 引擎保底段落，正文区绝不空白', async () => {
+  const s = 局面()
+  const 无正文 = '[鳌太万象]\n1. 乙\n\n[下回选项]\nA. 丙\n\n<<<STATE>>>\n{}'
+  let 调用 = 0
+  const r = await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '继续赶路', 类型: '徒步', require: {}, cost: {} },
+    config: 假配置,
+    streamImpl: async () => { 调用++; return { text: 无正文 } },
+  })
+  assert.equal(调用, 2)
+  assert.ok(r.ok)
+  assert.ok(r.剧情.trim().length > 20, `正文区不能空白：「${r.剧情}」`)
+  assert.ok(r.剧情.includes('继续赶路'), '保底段落应提到玩家的选择')
+  assert.ok(r.warnings.some((w) => w.includes('保底')), '应有保底警告供排查')
+})
+
 test('以段落名开头的正文行不会被误吃成标记', () => {
   const r = parseTurn('[剧情]\n选项摆在眼前，你却在想别的。\n\n[下回选项]\nA. 丙\n\n<<<STATE>>>\n{}')
   assert.ok(r.剧情.includes('选项摆在眼前'), `正文被吃掉了：${r.剧情}`)
