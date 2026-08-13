@@ -1,5 +1,5 @@
 import { NPCS, getNpc } from '../data/npcs.js'
-import { getGear } from '../data/gear.js'
+import { getGear, ALL_GEAR } from '../data/gear.js'
 import { ROUTE, getNode, isAdjacent } from '../data/route.js'
 
 // 门槛夹取表。LLM 现编的门槛不能超出这个范围，否则「喝口水」也要求经验 80。
@@ -13,6 +13,22 @@ const 合法选项id = new Set(['A', 'B', 'C', 'D'])
 
 function 现有装备(state, gearId) {
   return Array.isArray(state?.pack) && state.pack.some((p) => p.gearId === gearId)
+}
+
+// LLM 用中文名指代装备，映射回 id；id 直传也认。
+// 人物、地点早就有中文名解析，唯独装备漏了——而 prompt 的装备清单里
+// 此前连 id 都没给过，模型只见过「综合医药包」这样的名字，根本写不出
+// first_aid。结果是每回合都弹「选项引用了不存在的物品，已剔除」。
+// 模糊匹配只在唯一命中时才认：「睡袋」同时命中三件装备，猜错等于
+// 替模型改需求，宁可驳回。
+export function resolveGear(name) {
+  if (!name || typeof name !== 'string') return null
+  const t = name.trim()
+  if (getGear(t)) return t
+  const 精确 = ALL_GEAR.find((g) => g.名称 === t)
+  if (精确) return 精确.id
+  const 候选 = ALL_GEAR.filter((g) => g.名称.includes(t))
+  return 候选.length === 1 ? 候选[0].id : null
 }
 
 // LLM 用中文名指代人物，映射回 id；id 直传也认。
@@ -97,7 +113,8 @@ export function clampRequire(类型, require) {
   if (Array.isArray(require?.物品)) {
     out.物品 = []
     for (const g of require.物品) {
-      if (getGear(g)) out.物品.push(g)
+      const id = resolveGear(g)
+      if (id) out.物品.push(id)
       else warnings.push(`选项引用了不存在的物品「${g}」，已剔除`)
     }
   }

@@ -5,7 +5,7 @@ import { runTurn, turnSeed } from '../src/turn.js'
 import { createInitialState } from '../src/engine/state.js'
 import { createJournal } from '../src/engine/journal.js'
 import { checkEnding } from '../src/engine/ending.js'
-import { validateProposal } from '../src/llm/validate.js'
+import { validateProposal, resolveGear, clampRequire } from '../src/llm/validate.js'
 import { buildSystemPrompt, buildUserMessage } from '../src/llm/prompt.js'
 import { parseTurn } from '../src/llm/parser.js'
 import { actionsViewModel } from '../src/ui/screen-game.js'
@@ -276,6 +276,28 @@ test('去向建议填当前所在地 = 原地不动，静默忽略、零警告',
   const v = validateProposal(s, { 去向建议: '水窝子营地' })
   assert.equal(v.去向, null)
   assert.equal(v.warnings.length, 0, `不该有警告：${v.warnings}`)
+})
+
+// ── 装备中文名解析：模型只见过中文名，不能因此每回合弹警告 ────────
+
+test('resolveGear 认 id、认全名、认唯一命中的简称，拒绝歧义', () => {
+  assert.equal(resolveGear('first_aid'), 'first_aid')
+  assert.equal(resolveGear('综合医药包'), 'first_aid')
+  assert.equal(resolveGear('医药包'), 'first_aid', '唯一命中的简称应该认')
+  assert.equal(resolveGear('睡袋'), null, '「睡袋」命中三件装备，歧义必须驳回')
+  assert.equal(resolveGear('查无此物'), null)
+})
+
+test('选项 require 里的中文装备名被解析成 id，零警告', () => {
+  const { require, warnings } = clampRequire('社交', { 物品: ['综合医药包', '动力绳 20m'] })
+  assert.deepEqual(require.物品, ['first_aid', 'rope'])
+  assert.equal(warnings.length, 0, `不该有警告：${warnings}`)
+})
+
+test('system prompt 的装备清单带 id，模型才写得出 id', () => {
+  const sys = buildSystemPrompt()
+  assert.ok(sys.includes('[first_aid]'), '装备清单缺 id')
+  assert.ok(sys.includes('[rope]'))
 })
 
 // ── parser 段落别名 ───────────────────────────────────────────────
