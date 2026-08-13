@@ -325,6 +325,35 @@ test('system prompt 的装备清单带 id，模型才写得出 id', () => {
   assert.ok(sys.includes('[rope]'))
 })
 
+// ── 剧情连贯性：上下文不断档，选项扣住正文 ────────────────────────
+
+test('最近回合随存档持久化，刷新后不断档；旧档缺该字段时安全回退', async () => {
+  const { packSave, unpackSave } = await import('../src/ui/save.js')
+  const s = 局面()
+  const j = createJournal()
+  const 回来 = unpackSave(packSave(s, j, ['第一回合的原文', '第二回合的原文']))
+  assert.deepEqual(回来.最近回合, ['第一回合的原文', '第二回合的原文'])
+
+  // 旧版存档没有 最近回合 字段——不能因此炸掉
+  const 旧包 = JSON.stringify({ 版本: 1, 摘要: 'x', state: s, journal: j })
+  assert.deepEqual(unpackSave(旧包).最近回合, [])
+})
+
+test('有上文时 user message 带续写指令，没上文时不带', () => {
+  const s = 局面()
+  const 有 = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: ['上回合原文'] })
+  assert.ok(有.includes('必须从上面最后一回合的结尾处继续写'), '缺续写指令')
+  const 无 = buildUserMessage({ state: s, journal: createJournal(), 既成事实: {}, 最近回合: [] })
+  assert.ok(!无.includes('必须从上面最后一回合的结尾处继续写'), '没上文不该有续写指令')
+})
+
+test('system prompt 有连贯性与选项扣题的硬规则', () => {
+  const sys = buildSystemPrompt()
+  assert.ok(sys.includes('连贯性'), '缺连贯性一节')
+  assert.ok(sys.includes('不得另起新场景'))
+  assert.ok(sys.includes('至少两个要点名本回合正文中出现过的'), '缺选项扣题规则')
+})
+
 // ── parser 段落别名 ───────────────────────────────────────────────
 
 test('段落别名：[万象] 与 [选项] 也认', () => {

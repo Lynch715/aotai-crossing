@@ -18,18 +18,21 @@ function 造摘要(state) {
   return `${state.pc.名字}｜${state.meta.季节}｜第${state.clock.day}天${state.clock.slot}｜${state.place.nodeId}`
 }
 
-export function packSave(state, journal) {
+// 最近回合也入档——它是剧情连贯性的命脉。只存 state+journal 的话，
+// 刷新页面后模型拿不到上文，故事必然从中间断档另起炉灶。
+export function packSave(state, journal, 最近回合 = []) {
   return JSON.stringify({
     版本: STATE_VERSION,
     摘要: 造摘要(state),
     state,
     journal,
+    最近回合,
   })
 }
 
 export function unpackSave(文本) {
   const 包 = JSON.parse(文本)
-  return { state: 包.state, journal: 包.journal, 摘要: 包.摘要, 版本: 包.版本 }
+  return { state: 包.state, journal: 包.journal, 最近回合: 包.最近回合 || [], 摘要: 包.摘要, 版本: 包.版本 }
 }
 
 // 版本迁移。比当前版本低的按需补字段；比当前版本高的一律拒绝——
@@ -48,9 +51,9 @@ export function migrateSave(包) {
   return { 可用: true, 迁移过: true, 包: 新 }
 }
 
-export function writeSave(storage, slotId, state, journal) {
+export function writeSave(storage, slotId, state, journal, 最近回合 = []) {
   try {
-    storage.setItem(saveKey(slotId), packSave(state, journal))
+    storage.setItem(saveKey(slotId), packSave(state, journal, 最近回合))
     return true
   } catch (err) {
     // 配额满时 setItem 抛 QuotaExceededError。无条件返回 true 是撒谎——

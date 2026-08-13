@@ -36,11 +36,8 @@ const APP会话 = {
   // 以下字段在出发后填入，游戏循环使用
   state: null,
   journal: null,
-  // 最近若干回合的摘要，供 LLM 获取上下文。
-  // 格式：[{ 标题, 剧情摘要, 选项, 判定 }]
-  // 说明见文末「调查点 1」注释。存档只含 state+journal，正文不存；
-  // 页面刷新后 最近回合 重置为空数组，引擎仍能正常运行（prompt 里
-  // 只是少了几行回顾，不影响任何数值判定）。
+  // 最近若干回合的原文（字符串数组），供 LLM 续写上下文。
+  // 随自动存档持久化——它是剧情连贯性的命脉，刷新后必须还原。
   最近回合: [],
 }
 
@@ -537,7 +534,7 @@ function APP出发(shopVm, router) {
   }
 
   const journal = createJournal()
-  writeSave(localStorage, 'auto', state, journal)
+  writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
 
   // 把 state/journal 挂到会话上，让 renderGame 能读到
   APP会话.state = state
@@ -817,14 +814,14 @@ function renderGame(router) {
   // 原生操作共用的收尾：存档、刷面板、刷顶栏，并接住可能触发的结局。
   // 返回 true 表示已经跳去结局页，调用方不要再动界面。
   function APP结算原生操作(反馈) {
-    writeSave(localStorage, 'auto', state, journal)
+    writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
     APP渲染面板(state)
     APP刷新顶栏()
     setText(APP行动反馈, 反馈 || '')
     const ending = checkEnding(state)
     if (ending) {
       applyEnding(state, ending)
-      writeSave(localStorage, 'auto', state, journal)
+      writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
       router.go('ending')
       return true
     }
@@ -958,12 +955,18 @@ function renderGame(router) {
       return
     }
 
-    // 把本回合摘要推入 最近回合（保留最近 4 条）。
-    // 必须是字符串——prompt.js 直接 join 拼进 user message，推对象进去的话
-    // 模型收到的上文就是三行 [object Object]，剧情脱轨就是这么来的。
+    // 把本回合推入 最近回合（保留最近 4 条）。
+    // 必须是字符串——prompt.js 直接 join 拼进 user message。
+    // 三条铁律：
+    // 1. 正文保留全文（上限只防跑飞）——曾经截前 200 字，把结尾切掉了，
+    //    而下一回合要续写的恰恰是结尾，剧情断档就是这么来的；
+    // 2. 万象要跟着进上下文——它们是模型自己埋的钩子（天气转坏、他队动向），
+    //    用完即扔的话下一回合只能另编一套，前后就对不上了；
+    // 3. 选择与判定写明白，让模型知道玩家刚做了什么。
     APP会话.最近回合.push([
       r.标题 ? `【${r.标题}】` : '',
-      (r.剧情 || '').slice(0, 200),
+      (r.剧情 || '').slice(0, 600),
+      (r.万象 || []).length ? `万象：${r.万象.join('；')}` : '',
       `（玩家选了「${选中项.文本 || 选中项.id}」，判定${r.判定 ? (r.判定.outcome === 'success' ? '成功' : '失败') : '—'}）`,
     ].filter(Boolean).join('\n'))
     if (APP会话.最近回合.length > 4) APP会话.最近回合.shift()
@@ -1024,7 +1027,7 @@ function renderGame(router) {
     APP渲染万象(r.万象)
 
     // 写自动存档
-    writeSave(localStorage, 'auto', state, journal)
+    writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
     // 刷新面板
     APP渲染面板(state)
     // 更新顶栏
@@ -1308,7 +1311,9 @@ function 启动() {
   if (APP存档 && APP存档.state) {
     APP会话.state = APP存档.state
     APP会话.journal = APP存档.journal
-    APP会话.最近回合 = []
+    // 最近回合从存档还原——它是剧情连贯性的命脉。此前刷新即清零，
+    // 模型拿不到上文，故事必从中间断档另起炉灶。
+    APP会话.最近回合 = APP存档.最近回合 || []
   }
 
   const 配置可用 = validateConfig(APP会话.config).ok
