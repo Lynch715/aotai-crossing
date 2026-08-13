@@ -125,13 +125,14 @@ export function clampRequire(类型, require) {
 const 入队上限 = 4
 const 伤病名上限 = 12
 const 合法严重度 = new Set(['轻', '重'])
+const 单回合金钱上限 = 500
 
 // 把 LLM 的 STATE 提议过一遍筛子。所有越权都记 warning，但不打断——游戏要能继续。
 export function validateProposal(state, proposal) {
   // warnings 是给玩家看的「真拦截」；微调 是护栏的日常工作（门槛/代价夹取），
   // 只进调试信息。混在一起的话，模型报个「经验:15」被夹到 20 这种鸡毛蒜皮
   // 也会让界面弹「本回合有 1 处提议被拦下」——狼来了喊多了，真警告没人看。
-  const out = { 好感变更: [], 说话人: null, 离队: [], 入队: [], 伤病新增: [], 伤病已处理: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [], 微调: [] }
+  const out = { 好感变更: [], 说话人: null, 离队: [], 入队: [], 伤病新增: [], 伤病已处理: [], 金钱变化: null, 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [], 微调: [] }
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return out
   // 「从不抛异常」得对 state 也成立，否则调用方传进半截状态时一样白屏。
   const 队伍 = Array.isArray(state?.party) ? state.party : []
@@ -203,6 +204,19 @@ export function validateProposal(state, proposal) {
       out.warnings.push(`说话人 ${proposal.说话人} 不在队伍里`)
     } else {
       out.说话人 = npcId
+    }
+  }
+
+  // —— 金钱变化（文档：「可想办法筹钱」的落点）。正负都认、幅度夹取，
+  // 只在剧情真演出了挣钱/破费时才该报——prompt 里有约束，这里管数值。
+  const 金钱 = proposal.金钱变化
+  if (金钱 && typeof 金钱 === 'object' && !Array.isArray(金钱)) {
+    if (typeof 金钱.delta === 'number' && Number.isFinite(金钱.delta) && 金钱.delta !== 0) {
+      const 夹 = Math.max(-单回合金钱上限, Math.min(单回合金钱上限, Math.round(金钱.delta)))
+      if (夹 !== 金钱.delta) out.微调.push(`金钱变化 ${金钱.delta} 越界，夹到 ${夹}`)
+      out.金钱变化 = { delta: 夹, 因: String(金钱.因 || '').slice(0, 30) }
+    } else if (金钱.delta !== undefined && 金钱.delta !== 0) {
+      out.warnings.push('金钱变化的 delta 不是数字，已驳回')
     }
   }
 

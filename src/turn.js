@@ -8,6 +8,7 @@ import { checkEnding, applyEnding } from './engine/ending.js'
 import { recordNode, recordEvent, addForeshadow, resolveForeshadow, compressJournal } from './engine/journal.js'
 import { getNode } from './data/route.js'
 import { getNpc } from './data/npcs.js'
+import { pickEvent } from './data/events.js'
 import { buildSystemPrompt, buildUserMessage, buildRepairMessage } from './llm/prompt.js'
 import { parseTurn } from './llm/parser.js'
 import { validateProposal, clampRequire, clampCost, weatherLevel } from './llm/validate.js'
@@ -100,6 +101,13 @@ export async function runTurn({
     // 判定失败不能白失败——否则成功与失败在引擎层是等价的，
     // 「明码标价的概率」就没有任何分量。
     if (判定.outcome === 'fail') 调整体力(state, -判定失败惩罚)
+    // 赌赢了要有回馈（文档：「同时回馈不同数值」）。只奖励真掷过骰的
+    // 勉强档——达标选项是按部就班，谈不上历练。封顶 100。
+    let 历练 = 0
+    if (判定.outcome === 'success' && 判定.roll !== null) {
+      历练 = 2
+      state.pc.户外经验 = Math.min(100, state.pc.户外经验 + 历练)
+    }
 
     // 时段推进：1 个基础时段 + 选项申报的额外时段。跨天连锁（睡眠、日粮、
     // 断粮惩罚）全在 advanceTimeSlot 里，这里只收集要告诉模型的事实。
@@ -111,6 +119,7 @@ export async function runTurn({
       if (r.跨天 && state.flags.失温连败 > 0) 推进备注.push(`夜里睡袋扛不住低温，出现失温征兆（连续 ${state.flags.失温连败} 晚）`)
     }
     if (金钱前 !== state.money) 推进备注.push(`花掉 ¥${金钱前 - state.money}`)
+    if (历练 > 0) 推进备注.push(`险中求成，户外经验 +${历练}`)
 
     const 既成事实 = {
       选择: `${选中项.id} ${选中项.文本 || ''}`.trim(),
@@ -119,9 +128,15 @@ export async function runTurn({
       已结算: [`体力 ${体力前}→${state.pc.体力}｜推进到第${state.clock.day}天${state.clock.slot}`, ...推进备注].join('｜'),
     }
 
+    // —— 季节固定事件：到点即触发，一局一次 ——
+    // 在请求前落账（记入 flags），失败回滚会连带撤销。指令注入 user message，
+    // 模型必须把它演进本回合的剧情里。
+    const 事件 = pickEvent(state)
+    if (事件) state.flags.触发过的事件id.push(事件.id)
+
     // —— 请求 ——
     const system = buildSystemPrompt()
-    const user = buildUserMessage({ state, journal, 既成事实, 最近回合 })
+    const user = buildUserMessage({ state, journal, 既成事实, 最近回合, 事件 })
     const { text, finish, reasoning } = await streamImpl({
       config, onDelta, signal,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
@@ -230,6 +245,12 @@ export async function runTurn({
         w.已处理 = true
         consumeItem(state, 'first_aid', 处理伤病耗材)
       }
+    }
+
+    // 金钱变化（文档：「可想办法筹钱」）。模型演出挣钱/破费的剧情后申报，
+    // 幅度已被校验层夹取，这里只管落账，地板为 0。
+    if (v.金钱变化) {
+      state.money = Math.max(0, state.money + v.金钱变化.delta)
     }
 
     for (const m of v.记忆) recordEvent(journal, state.clock, m)

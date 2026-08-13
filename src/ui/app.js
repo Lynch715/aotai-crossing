@@ -563,10 +563,13 @@ function renderGame(router) {
   setText(APP海拔, vm.顶栏.海拔 + 'm')
   const APP天气 = el('span')
   setText(APP天气, vm.顶栏.天气)
+  const APP行程 = el('span')
+  setText(APP行程, vm.顶栏.行程)
   APP顶栏.appendChild(APP节点名)
   APP顶栏.appendChild(APP时间)
   APP顶栏.appendChild(APP海拔)
   APP顶栏.appendChild(APP天气)
+  APP顶栏.appendChild(APP行程)
 
   // 半途放弃重开的出口。两段式确认——整局进度一键清空，误触代价太大。
   const APP重开钮 = el('button', { class: 'link-btn' }, ['重新开始'])
@@ -802,6 +805,7 @@ function renderGame(router) {
     setText(APP时间, v.顶栏.时间)
     setText(APP海拔, v.顶栏.海拔 + 'm')
     setText(APP天气, v.顶栏.天气)
+    setText(APP行程, v.顶栏.行程)
     // 场景图每次都刷，不做「变了才刷」的聪明判断——sceneInto 是
     // 新图加载成功才替换，同图命中缓存零成本；省掉的那点请求不值得
     // 为它养一个可能失同步的状态变量。
@@ -1066,6 +1070,16 @@ function renderPanel(vm) {
   APP面板.appendChild(APP名字行)
 
   // 体力
+  // 户外经验：勉强档赌赢会涨（文档「回馈不同数值」），涨了要看得见
+  const APP经验行 = el('div', { class: 'game-stat-row' })
+  const APP经验标签 = el('span', { class: 'game-stat-label' })
+  setText(APP经验标签, '经验')
+  const APP经验值面板 = el('span', { class: 'game-stat-val' })
+  setText(APP经验值面板, vm.户外经验)
+  APP经验行.appendChild(APP经验标签)
+  APP经验行.appendChild(APP经验值面板)
+  APP面板.appendChild(APP经验行)
+
   const APP体力行 = el('div', { class: 'game-stat-row' })
   const APP体力标签 = el('span', { class: 'game-stat-label' })
   setText(APP体力标签, '体力')

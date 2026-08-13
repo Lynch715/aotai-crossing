@@ -11,6 +11,7 @@ export const MODULE_ORDER = [
   'src/data/npcs.js',
   'src/data/gear.js',
   'src/data/seasons.js',
+  'src/data/events.js',
   'src/engine/state.js',
   'src/engine/rng.js',
   'src/engine/threshold.js',

@@ -70,6 +70,13 @@ const ROUTE_EXTRA_LINKS = [
   ['yingdi2800', 'songpingsi'],
 ]
 
+// 主线完成度（文档要求的「完成度」展示）。苗圃是备用起点，等价于第 1 站；
+// 下撤点不在主线上，返回 null 由 UI 隐藏。
+export function mainProgress(nodeId) {
+  const i = MAIN_PATH.indexOf(nodeId === 'miaopu' ? 'tangkou' : nodeId)
+  return i === -1 ? null : { 序号: i + 1, 总数: MAIN_PATH.length }
+}
+
 const ROUTE_BY_ID = new Map(ROUTE.map((n) => [n.id, n]))
 
 export function getNode(id) {

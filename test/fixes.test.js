@@ -354,6 +354,100 @@ test('system prompt 有连贯性与选项扣题的硬规则', () => {
   assert.ok(sys.includes('至少两个要点名本回合正文中出现过的'), '缺选项扣题规则')
 })
 
+// ── 偏离补齐：季节事件 / 筹钱 / 完成度 / 经验回馈 ─────────────────
+
+test('季节事件按 节点+季节 触发，一局一次，登场人物已在队则跳过', async () => {
+  const { pickEvent, EVENTS } = await import('../src/data/events.js')
+  const s = 局面()
+  s.place = { nodeId: 'yaowangdong', 海拔: 3360 }
+  const e = pickEvent(s)
+  assert.equal(e.id, 'meet_taxue', '药王洞应触发踏雪登场')
+
+  s.flags.触发过的事件id = ['meet_taxue']
+  assert.equal(pickEvent(s), null, '已触发不得重复')
+
+  s.flags.触发过的事件id = []
+  s.party.push({ npcId: 'taxue', 好感: 30, 状态: '幸存', 在队: true })
+  assert.equal(pickEvent(s), null, '踏雪已在队就不再登场')
+
+  // 季节匹配：冬季的东跑马梁是暴风雪，秋季不是
+  const 冬 = 局面()
+  冬.meta.季节 = '冬季'
+  冬.place = { nodeId: 'dongpaomaliang', 海拔: 3450 }
+  assert.equal(pickEvent(冬).id, 'dong_blizzard_dongpaomaliang')
+  assert.ok(EVENTS.length >= 15, '事件表覆盖四季与人物登场')
+})
+
+test('事件指令注入 user message 并记入 flags，回合失败会回滚', async () => {
+  const s = 局面()
+  s.place = { nodeId: 'yingdi2800', 海拔: 2800 }
+  const 收到 = []
+  const r = await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '扎营', 类型: '徒步', require: {}, cost: {} },
+    config: 假配置,
+    streamImpl: async ({ messages }) => { 收到.push(messages[1].content); return { text: '[剧情]\n甲\n\n[下回选项]\nA. 乙\n\n<<<STATE>>>\n{}' } },
+  })
+  assert.ok(r.ok)
+  assert.ok(收到[0].includes('本回合大事'), '事件块未注入')
+  assert.ok(收到[0].includes('羚牛'), '2800营地应触发羚牛事件')
+  assert.deepEqual(s.flags.触发过的事件id, ['lingniu_2800'])
+
+  // 失败回滚：事件标记也要一并撤销
+  const s2 = 局面()
+  s2.place = { nodeId: 'yingdi2800', 海拔: 2800 }
+  const err = new Error('boom')
+  await runTurn({
+    state: s2, journal: createJournal(),
+    选中项: { id: 'A', 文本: '扎营', 类型: '徒步', require: {}, cost: {} },
+    config: 假配置, streamImpl: async () => { throw err },
+  })
+  assert.deepEqual(s2.flags.触发过的事件id, [], '回滚后不该留下事件标记')
+})
+
+test('金钱变化：夹到 ±500、落账不穿底，非数字驳回', async () => {
+  const v = validateProposal(局面(), { 金钱变化: { delta: 2000, 因: '帮工' } })
+  assert.equal(v.金钱变化.delta, 500)
+  assert.ok(v.微调.some((w) => w.includes('金钱')))
+  const 坏 = validateProposal(局面(), { 金钱变化: { delta: '很多' } })
+  assert.equal(坏.金钱变化, null)
+
+  const s = 局面()
+  await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '帮忙', 类型: '社交', require: {}, cost: {} },
+    config: 假配置,
+    streamImpl: 回复带('{"金钱变化":{"delta":300,"因":"帮别队修帐篷"}}'),
+  })
+  assert.equal(s.money, 4320 + 300, '筹到的钱应落账')
+})
+
+test('勉强档赌赢经验 +2 封顶 100，达标与失败不涨', async () => {
+  const 跑一把 = async (require, rng) => {
+    const s = 局面()
+    await runTurn({
+      state: s, journal: createJournal(),
+      选中项: { id: 'A', 文本: '试', 类型: '徒步', require, cost: {} },
+      config: 假配置, rng, streamImpl: 极简回复,
+    })
+    return s.pc.户外经验
+  }
+  assert.equal(await 跑一把({ 经验: 43 }, () => 0), 40, '差5点赌赢应 38→40')
+  assert.equal(await 跑一把({}, () => 0), 38, '达标不涨')
+  assert.equal(await 跑一把({ 经验: 43 }, () => 0.99), 38, '赌输不涨')
+})
+
+test('主线完成度：起点 1/21，苗圃等价起点，下撤点隐藏', async () => {
+  const { mainProgress } = await import('../src/data/route.js')
+  assert.deepEqual(mainProgress('tangkou'), { 序号: 1, 总数: 21 })
+  assert.deepEqual(mainProgress('miaopu'), { 序号: 1, 总数: 21 })
+  assert.deepEqual(mainProgress('baxiantai'), { 序号: 17, 总数: 21 })
+  assert.equal(mainProgress('hetaoping'), null)
+  const { gameViewModel } = await import('../src/ui/screen-game.js')
+  const s = 局面()
+  assert.equal(gameViewModel({ state: s, 回合: null, 说话人: null }).顶栏.行程, '行程 7/21')
+})
+
 // ── parser 段落别名 ───────────────────────────────────────────────
 
 test('段落别名：[万象] 与 [选项] 也认', () => {

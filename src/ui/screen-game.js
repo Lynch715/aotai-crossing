@@ -1,4 +1,4 @@
-import { getNode } from '../data/route.js'
+import { getNode, mainProgress } from '../data/route.js'
 import { getNpc } from '../data/npcs.js'
 import { getGear } from '../data/gear.js'
 import { activeParty } from '../engine/party.js'
@@ -102,12 +102,15 @@ export function stageViewModel(state, 说话人) {
 
 export function gameViewModel({ state, 回合, 说话人 }) {
   const node = getNode(state.place.nodeId)
+  // 完成度（文档要求的「主线完成度」）。下撤点不在主线上，返回空串隐藏。
+  const 进度 = mainProgress(state.place.nodeId)
   return {
     顶栏: {
       时间: `第${state.clock.day}天 ${state.clock.slot}`,
       地点: node ? node.名称 : state.place.nodeId,
       海拔: state.place.海拔,
       天气: `${state.weather.状态} ${state.weather.等级}级`,
+      行程: 进度 ? `行程 ${进度.序号}/${进度.总数}` : '',
     },
     面板: panelViewModel(state),
     舞台: stageViewModel(state, 说话人),
