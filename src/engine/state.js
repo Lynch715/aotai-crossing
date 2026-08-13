@@ -1,5 +1,5 @@
 import { getNode } from '../data/route.js'
-import { tierOf } from '../data/gear.js'
+import { tierOf, getGear } from '../data/gear.js'
 
 export const STATE_VERSION = 1
 
@@ -20,7 +20,9 @@ export function createInitialState(opts) {
     money: opts.金钱,
     pack: [],
     carry: { 当前: 0, 上限: 30 },
-    party: opts.队友.map((t) => ({ npcId: t.npcId, 好感: t.好感, 状态: '正常', 在队: true })),
+    // 队友初始状态照抄人物表（王大鹏的膝伤、周涛的脚踝）。此前一律写「正常」，
+    // 抽卡卡片和 system prompt 里说他带伤、user message 里又说他正常，模型无所适从。
+    party: opts.队友.map((t) => ({ npcId: t.npcId, 好感: t.好感, 状态: t.状态 || '正常', 在队: true })),
     flags: { 已求救: false, 已下撤: false, 高海拔过夜数: 0, 失温连败: 0, 触发过的事件id: [] },
     ending: null,
   }
@@ -42,6 +44,14 @@ export function recalcCarry(state) {
   state.carry.当前 = Math.round(合计 * 100) / 100
 }
 
+// 分份物品（食物、气罐）的单重 = 整包重量 ÷ 份数。tier.重量 是采购时整包的重量，
+// 数量的语义是「还剩几份」。直接拿 tier.重量 当单重的话，5 份主粮会按 5 个整包计重。
+function 单重of(gearId, tier) {
+  const 份数 = getGear(gearId)?.份数
+  const 除数 = Number.isFinite(份数) && 份数 > 0 ? 份数 : 1
+  return Math.round((tier.重量 / 除数) * 1000) / 1000
+}
+
 export function addItem(state, gearId, 档, 数量 = 1) {
   const tier = tierOf(gearId, 档)
   if (!tier) return false
@@ -52,9 +62,9 @@ export function addItem(state, gearId, 档, 数量 = 1) {
     // 算出错值且无人察觉——而「数值不飘」正是这整套架构存在的理由。
     已有.数量 += 数量
     已有.档 = 档
-    已有.单重 = tier.重量
+    已有.单重 = 单重of(gearId, tier)
   } else {
-    state.pack.push({ gearId, 档, 数量, 单重: tier.重量, 余量: 100 })
+    state.pack.push({ gearId, 档, 数量, 单重: 单重of(gearId, tier), 余量: 100 })
   }
   recalcCarry(state)
   return true

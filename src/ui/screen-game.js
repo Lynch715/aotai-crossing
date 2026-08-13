@@ -4,7 +4,29 @@ import { getGear } from '../data/gear.js'
 import { activeParty } from '../engine/party.js'
 import { affinityLabel } from '../engine/affinity.js'
 import { gapFor, successChance } from '../engine/threshold.js'
+import { hasItem } from '../engine/state.js'
 import { splitParagraphs } from './prose.js'
+
+const GAME_每次热食耗气 = 8
+
+// 原生操作的可用性。这些操作（进食/休整/求救）不经过 LLM——
+// consume.js 里的 eatHot/eatCold/rest 写了又测了，此前却没有任何调用方，
+// 炉头气罐冻干餐全是死重。可用性判定放视图模型层，才能进 node --test。
+export function actionsViewModel(state) {
+  const 结束 = state.phase === '结局'
+  const 炉 = state.pack.find((p) => p.gearId === 'stove')
+  const 有餐 = hasItem(state, 'freeze_dried') || hasItem(state, 'extra_freeze_dried')
+  const 有气 = !!炉 && (炉.余量 >= GAME_每次热食耗气 || hasItem(state, 'extra_canister'))
+  const 热食原因 = !炉 ? '没有炉具' : !有餐 ? '没有冻干餐' : !有气 ? '气罐见底' : ''
+  const 有求救设备 = hasItem(state, 'gps') || hasItem(state, 'sat_phone')
+
+  return {
+    热食: { 可用: !结束 && !!炉 && 有餐 && 有气, 原因: 热食原因, 文案: '热食 +6' },
+    冷食: { 可用: !结束 && hasItem(state, 'trail_snack'), 原因: hasItem(state, 'trail_snack') ? '' : '没有路餐', 文案: '路餐 +3' },
+    休整: { 可用: !结束, 原因: '', 文案: hasItem(state, 'camp_stool') ? '休整 +10（耗一个时段）' : '休整 +8（耗一个时段）' },
+    求救: { 可用: !结束 && 有求救设备, 原因: 有求救设备 ? '' : '没有 GPS 信标或卫星电话', 文案: '发出求救（结束本局）' },
+  }
+}
 
 const GAME_负重偏重线 = 0.88
 const GAME_体力告警线 = 20

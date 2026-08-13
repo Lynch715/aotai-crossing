@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { writeFileSync, unlinkSync, readFileSync } from 'node:fs'
+import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { stripModuleSyntax, buildScript, assertModuleOrderComplete, assertHtmlPlaceholders, buildHtml } from '../build.mjs'
 const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -100,13 +101,16 @@ test('bundle 可求值且内部函数可调用', () => {
   delete globalThis.__probe
 })
 
-// Issue 3: MODULE_ORDER 漏登记改为构建时报错
+// Issue 3: MODULE_ORDER 漏登记改为构建时报错。
+// 探针写进 tmpdir 里的假 root，绝不碰真仓库的 src/——真 src/ 里的探针
+// 一旦删除失败会连锁挂掉后续所有构建测试，还污染仓库。
 test('assertModuleOrderComplete 在模块未登记时抛出含路径的错误', () => {
-  const tmpPath = join(ROOT, 'src/engine/__tmp_test_probe__.js')
-  writeFileSync(tmpPath, '// temp\n', 'utf8')
+  const 假root = mkdtempSync(join(tmpdir(), 'aotai-build-'))
+  mkdirSync(join(假root, 'src/engine'), { recursive: true })
+  writeFileSync(join(假root, 'src/engine/__tmp_test_probe__.js'), '// temp\n', 'utf8')
   try {
     assert.throws(
-      () => assertModuleOrderComplete(),
+      () => assertModuleOrderComplete(假root),
       (err) => {
         assert.ok(err.message.includes('__tmp_test_probe__'), `错误消息未含文件名: ${err.message}`)
         assert.ok(err.message.includes('MODULE_ORDER'), `错误消息未提及 MODULE_ORDER: ${err.message}`)
@@ -115,7 +119,7 @@ test('assertModuleOrderComplete 在模块未登记时抛出含路径的错误', 
       '漏登记模块时应抛错',
     )
   } finally {
-    unlinkSync(tmpPath)
+    rmSync(假root, { recursive: true, force: true })
   }
 })
 

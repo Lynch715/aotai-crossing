@@ -37,15 +37,20 @@ export function effectiveWarmth(state) {
   return 最暖 - 加成
 }
 
+const 每处未愈伤病拖累 = 2
+
 export function stepStaminaCost(state) {
   const 超出 = Math.max(0, state.carry.当前 - 负重基准线)
   let cost = Math.floor(基础时段消耗 * Math.pow(1.04, 超出))
   if (state.place.海拔 > 高海拔线 && !isAcclimatized(state)) cost += 2
   if (hasItem(state, 'trekking_poles')) cost -= 1
+  // 带伤走路更费劲。这是伤病在体力线上的唯一挂钩点——没有它，
+  // 轻伤对玩家来说就只是一行字。
+  cost += (state.pc.伤病 || []).filter((w) => !w.已处理).length * 每处未愈伤病拖累
   return Math.max(1, cost)
 }
 
-function 调整体力(state, delta) {
+export function 调整体力(state, delta) {
   state.pc.体力 = Math.max(0, Math.min(100, state.pc.体力 + delta))
   return state
 }
@@ -116,6 +121,25 @@ export function advanceSlot(state) {
     state.clock.slot = SLOTS[i + 1]
   }
   return state
+}
+
+const 恶劣天气线 = 6
+const 每份欠粮惩罚 = 8
+
+// 推进一个时段，并处理跨天的全部连锁（睡眠、日粮、断粮惩罚）。
+// 这段连锁此前内联在 turn.js 里；「原地休整」等原生操作也要推进时段，
+// 各写一份的话，总有一份会漏掉 sleep() 或断粮惩罚。唯一入口，谁调都一样。
+export function advanceTimeSlot(state) {
+  const 日前 = state.clock.day
+  advanceSlot(state)
+  if (state.clock.day === 日前) return { 跨天: false, 断粮: false, 欠缺: 0 }
+
+  sleep(state, { 恶劣天气: (state.weather?.等级 ?? 0) >= 恶劣天气线 })
+  const { 断粮, 欠缺 } = dailyUpkeep(state)
+  // 断粮的后果：每欠一份主粮扣体力。没有这一条，断粮只是一个没人读的返回值，
+  // 游戏可以无限期原地不动——推进压力就来自这里和体力线。
+  if (欠缺 > 0) 调整体力(state, -欠缺 * 每份欠粮惩罚)
+  return { 跨天: true, 断粮, 欠缺 }
 }
 
 // 每天扣 2 份主粮；主粮见底后自动动用 extra_staple 这个缓冲池

@@ -56,18 +56,21 @@ export function stripModuleSyntax(source) {
 }
 
 // 防呆：src/ 下每个 .js 都必须登记进 MODULE_ORDER，否则产物会静默缺模块。
-function findSourceModules(dir = 'src') {
+// root 可注入——测试要验证「漏登记会报错」，就得往某个 src/ 里塞探针文件；
+// 塞进真仓库的 src/ 的话，探针一旦删除失败（只读挂载、权限）会连锁挂掉
+// 后续所有构建测试，还污染仓库。让测试用 tmpdir 里的假 root。
+function findSourceModules(dir = 'src', root = ROOT) {
   const out = []
-  for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+  for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
     const rel = `${dir}/${entry.name}`
-    if (entry.isDirectory()) out.push(...findSourceModules(rel))
+    if (entry.isDirectory()) out.push(...findSourceModules(rel, root))
     else if (entry.name.endsWith('.js')) out.push(rel)
   }
   return out
 }
 
-export function assertModuleOrderComplete() {
-  const missing = findSourceModules().filter((f) => !MODULE_ORDER.includes(f))
+export function assertModuleOrderComplete(root = ROOT) {
+  const missing = findSourceModules('src', root).filter((f) => !MODULE_ORDER.includes(f))
   if (missing.length) {
     throw new Error(`以下模块未登记进 MODULE_ORDER，不会进入产物：\n  ${missing.join('\n  ')}`)
   }

@@ -39,17 +39,26 @@ test('背包条目补齐单重，负重按单重×数量算', () => {
   const s = 基础状态()
   const 包 = s.pack.find((p) => p.gearId === 'backpack')
   assert.equal(包.单重, 2.1)
-  // 背包 2.1 + 主流干粮 2.0 = 4.1
-  assert.equal(s.carry.当前, 4.1)
+  // 主粮是分份物品：单重 = 整包 2.0kg ÷ 14 份 ≈ 0.143。
+  // 背包 2.1 + 1 份主粮 0.143 ≈ 2.24
+  assert.equal(s.carry.当前, 2.24)
+})
+
+test('分份物品按整包份数入包时，总重等于整包重量', () => {
+  const s = 基础状态()
+  removeItem(s, 'staple_food', 99)
+  addItem(s, 'staple_food', '主流', 14)
+  // 14 × 0.143 = 2.002 → 保留两位 2.0（±0.01 的量化误差可接受）
+  assert.ok(Math.abs(s.carry.当前 - (2.1 + 2.0)) <= 0.01, `总重漂了: ${s.carry.当前}`)
 })
 
 test('addItem 累加数量并重算负重', () => {
   const s = 基础状态()
   addItem(s, 'ibuprofen', '基础', 1)
-  assert.equal(s.carry.当前, 4.15)
+  assert.equal(s.carry.当前, 2.29)
   addItem(s, 'ibuprofen', '基础', 2)
   assert.equal(s.pack.find((p) => p.gearId === 'ibuprofen').数量, 3)
-  assert.equal(s.carry.当前, 4.25)
+  assert.equal(s.carry.当前, 2.39)
 })
 
 test('removeItem 扣到 0 就摘出背包', () => {
@@ -127,8 +136,8 @@ test('addItem 换档时同步更新档次与单重，不留旧值', () => {
   assert.equal(包.档, '经济')
   assert.equal(包.单重, 2.5)
   assert.equal(包.数量, 2)
-  // 2×2.5 + 干粮 2.0 = 7.0；若单重停留在旧档会算成 6.2
-  assert.equal(s.carry.当前, 7)
+  // 2×2.5 + 1 份干粮 0.143 ≈ 5.14；若单重停留在旧档会算成 4.34
+  assert.equal(s.carry.当前, 5.14)
 })
 
 test('起点不是合法节点时报出可读的错，而不是裸 TypeError', () => {
@@ -147,12 +156,12 @@ test('recalcCarry 幂等', () => {
   const s = 基础状态()
   recalcCarry(s)
   recalcCarry(s)
-  assert.equal(s.carry.当前, 4.1)
+  assert.equal(s.carry.当前, 2.24)
 })
 
 test('负重保留一位小数，不出浮点毛刺', () => {
   const s = 基础状态()
   addItem(s, 'emergency_blanket', '基础', 3)
-  assert.equal(s.carry.当前, 4.25)
+  assert.equal(s.carry.当前, 2.39)
   assert.ok(String(s.carry.当前).length <= 5, `浮点毛刺: ${s.carry.当前}`)
 })

@@ -96,6 +96,8 @@ function 造错误(info) {
   return e
 }
 
+export const DEFAULT_TIMEOUT_MS = 90000
+
 export async function streamChat({
   config, messages, onDelta,
   fetchImpl = globalThis.fetch, sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -108,6 +110,21 @@ export async function streamChat({
   let 最后错误 = null
 
   for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+    // 每次尝试配一个自己的 AbortController：定时器负责超时，caller 的 signal
+    // 负责玩家取消，两路都汇到它上面。此前 classifyError 里写好了 timeout 分支，
+    // 但没有任何人真的设置超时——API 一旦挂起就是永久转圈。
+    const 控制器 = new AbortController()
+    const 超时 = setTimeout(() => 控制器.abort(), config.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+    const 转发取消 = () => 控制器.abort()
+    if (signal) {
+      if (signal.aborted) 控制器.abort()
+      else signal.addEventListener('abort', 转发取消, { once: true })
+    }
+    const 清场 = () => {
+      clearTimeout(超时)
+      if (signal) signal.removeEventListener('abort', 转发取消)
+    }
+
     let response = null
     try {
       response = await fetchImpl(拼接URL(config.baseURL), {
@@ -122,9 +139,10 @@ export async function streamChat({
           ...(PRESETS.find((p) => p.id === config.presetId)?.额外参数 || {}),
           ...(config.额外参数 || {}),
         }),
-        signal,
+        signal: 控制器.signal,
       })
     } catch (err) {
+      清场()
       const info = classifyError(err, null)
       最后错误 = 造错误(info)
       // 玩家主动取消也走 AbortError，和超时长得一样。信号已经 aborted 就别重试了——
@@ -135,6 +153,7 @@ export async function streamChat({
     }
 
     if (!response.ok) {
+      清场()
       const info = classifyError(null, response)
       最后错误 = 造错误(info)
       if (!info.可重试 || signal?.aborted) throw 最后错误
@@ -163,10 +182,19 @@ export async function streamChat({
         }
         if (r.done) break
       }
+    } catch (err) {
+      // 流中途被掐断（超时或玩家取消）。不重试——重试会把已上屏的半段正文
+      // 再拼一遍。分类后抛出去，让回合走整体回滚。
+      清场()
+      const info = signal?.aborted
+        ? { kind: 'cancelled', 可重试: false, 提示: '已取消本回合。' }
+        : classifyError(err, null)
+      throw 造错误(info)
     } finally {
       reader.releaseLock()
     }
 
+    清场()
     return { text, finish, reasoning }
   }
 

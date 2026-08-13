@@ -14,6 +14,16 @@ export function setNpcStatus(state, journal, npcId, 状态) {
   return true
 }
 
+// 入队。素材要求「其他人在徒步过程中慢慢接触」、踏雪与猛蛇过江「途中遭遇」——
+// 没有这个入口，12 个人物一局永远只能见到开局抽到的 2 个，且队伍只减不增。
+// 曾经离队的人不能回来（离队不可逆，与 npcLeaves 的约定对齐）。
+export function npcJoins(state, journal, npcId, { 好感 = 25, 状态 = '正常' } = {}) {
+  if (state.party.some((p) => p.npcId === npcId)) return false
+  state.party.push({ npcId, 好感, 状态, 在队: true })
+  updateNpcStatus(journal, npcId, 状态)
+  return true
+}
+
 // 离队。好感门槛判定只认在队的人，所以这一步必须真的落到 state 上，
 // 否则玩家会看到对着已经下撤的人搭话的选项。
 export function npcLeaves(state, journal, npcId, 原因) {

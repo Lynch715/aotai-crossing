@@ -125,6 +125,8 @@ export function shopViewModel({ cart, 季节 }) {
     警告: gearWarnings(季节, 已选ids),
     缺件,
     可出发: 缺件.length === 0 && !超支 && !超重,
-    背包: Object.entries(cart).map(([gearId, 档]) => ({ gearId, 档, 数量: 1 })),
+    // 分份物品（食物、气罐）按 份数 入包——引擎按份消耗（每天扣 2 份主粮），
+    // 一律写 数量:1 的话，「7 天的主粮」第一晚就被扣光了。
+    背包: Object.entries(cart).map(([gearId, 档]) => ({ gearId, 档, 数量: getGear(gearId)?.份数 || 1 })),
   }
 }

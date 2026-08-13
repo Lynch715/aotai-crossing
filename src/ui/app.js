@@ -6,19 +6,21 @@
 import { el, setText, clear } from './dom.js'
 import { createRouter } from './router.js'
 import { portraitInto } from './portrait.js'
-import { loadConfig, saveConfig, configViewModel } from './config.js'
+import { loadConfig, saveConfig, configViewModel, validateConfig } from './config.js'
 import { createViewModel, randomDraft, deriveExperience } from './screen-create.js'
 import { drawCompanions, drawViewModel } from './screen-draw.js'
 import { shopViewModel, toggleItem, setTier, recommendedCart, START_MONEY } from './screen-shop.js'
-import { gameViewModel, panelViewModel } from './screen-game.js'
+import { gameViewModel, panelViewModel, actionsViewModel } from './screen-game.js'
 import { endingViewModel } from './screen-ending.js'
 import { createTypewriter, splitParagraphs } from './prose.js'
 import { rollSeason, getSeason } from '../data/seasons.js'
 import { getNpc } from '../data/npcs.js'
 import { makeRng } from '../engine/rng.js'
 import { createInitialState } from '../engine/state.js'
+import { eatHot, eatCold, rest, advanceTimeSlot } from '../engine/consume.js'
+import { checkEnding, applyEnding } from '../engine/ending.js'
 import { createJournal } from '../engine/journal.js'
-import { writeSave, readSave } from './save.js'
+import { writeSave, readSave, deleteSave } from './save.js'
 import { runTurn } from '../turn.js'
 
 // 会话状态：出发前的全部中间产物。这不是游戏状态——游戏状态在出发时才由
@@ -75,14 +77,17 @@ function renderConfig(router) {
     oninput: (e) => { APP会话.config = { ...APP会话.config, baseURL: e.target.value }; APP刷新Config() },
   })
 
+  // 有还没打完的局时，配置完直接回牌桌——这一屏也是「换了机器 / key 失效」
+  // 时的落脚点，不能把人送去重新捏人。
+  const 有局在身 = !!(APP会话.state && APP会话.state.phase !== '结局')
   const APP下一步Config = el('button', {
     class: 'primary',
     disabled: !vm.可用 || undefined,
     onclick: () => {
       saveConfig(localStorage, APP会话.config)
-      router.go('create')
+      router.go(有局在身 ? 'game' : 'create')
     },
-  }, ['下一步：捏人 →'])
+  }, [有局在身 ? '继续旅程 →' : '下一步：捏人 →'])
 
   root.appendChild(el('h1', { text: '穿越鳌太线' }))
   root.appendChild(el('p', { class: 'muted', text: '接你自己的模型。key 只存在这台机器的浏览器里，不经过任何第三方。' }))
@@ -216,6 +221,22 @@ function renderCreate(router) {
   const APP经验标注 = el('span', { class: 'muted' })
   setText(APP经验标注, `户外经验 ${APP经验值} / 100`)
 
+  // 经验微调 ±10：spec 写明可手调，deriveExperience 的算法也一直支持，
+  // 此前却没有任何控件能改它——有算法没入口的死字段。
+  const 当前微调 = APP会话.draft.经验微调 || 0
+  const APP微调显示 = el('span', { class: 'muted' })
+  setText(APP微调显示, `微调 ${当前微调 > 0 ? '+' : ''}${当前微调}`)
+  const APP调经验 = (d) => {
+    const 新 = Math.max(-10, Math.min(10, (APP会话.draft.经验微调 || 0) + d))
+    APP会话.draft = { ...APP会话.draft, 经验微调: 新 }
+    renderCreate(router)
+  }
+  const APP微调行 = el('div', { class: 'row' }, [
+    el('button', { class: 'tag', onclick: () => APP调经验(-1) }, ['−1']),
+    APP微调显示,
+    el('button', { class: 'tag', onclick: () => APP调经验(1) }, ['+1']),
+  ])
+
   // 随机按钮
   const APP随机按钮 = el('button', {
     onclick: () => {
@@ -254,7 +275,7 @@ function renderCreate(router) {
     APP技能组,
     el('div', { class: 'sep' }),
     el('label', {}),
-    APP经验条, APP经验标注,
+    APP经验条, APP经验标注, APP微调行,
   ])
 
   // 同 renderConfig：文本框只刷派生 UI，否则每敲一个字都整屏重建、焦点当场丢失。
@@ -549,6 +570,25 @@ function renderGame(router) {
   APP顶栏.appendChild(APP时间)
   APP顶栏.appendChild(APP海拔)
   APP顶栏.appendChild(APP天气)
+
+  // 半途放弃重开的出口。两段式确认——整局进度一键清空，误触代价太大。
+  const APP重开钮 = el('button', { class: 'link-btn' }, ['重新开始'])
+  let APP重开待确认 = false
+  APP重开钮.addEventListener('click', () => {
+    if (!APP重开待确认) {
+      APP重开待确认 = true
+      setText(APP重开钮, '确认放弃本局？')
+      return
+    }
+    deleteSave(localStorage, 'auto')
+    APP会话.state = null
+    APP会话.journal = null
+    APP会话.最近回合 = []
+    APP会话.种子 = Math.floor(Math.random() * 2 ** 31)
+    APP会话.draft = randomDraft(makeRng(APP会话.种子))
+    router.go('create')
+  })
+  APP顶栏.appendChild(APP重开钮)
   root.appendChild(APP顶栏)
 
   // ── 双栏
@@ -599,6 +639,12 @@ function renderGame(router) {
   const APP选项区 = el('div', { class: 'options-area' })
   APP右栏.appendChild(APP选项区)
 
+  // 原生行动区（进食/休整/求救——不经过模型的操作）
+  const APP行动区 = el('div', { class: 'game-controls' })
+  const APP行动反馈 = el('div', { class: 'muted' })
+  APP右栏.appendChild(APP行动区)
+  APP右栏.appendChild(APP行动反馈)
+
   // 操作按钮（跳过打字机）
   const APP控制区 = el('div', { class: 'game-controls' })
   APP右栏.appendChild(APP控制区)
@@ -647,9 +693,6 @@ function renderGame(router) {
   }
 
   function APP渲染舞台(st, 说话人) {
-    const { gameViewModel: gvm } = { gameViewModel }
-    // 直接调 stageViewModel 同源函数（从 screen-game.js 里的 stageViewModel 已被
-    // gameViewModel 包装使用，不单独导出；直接操作 DOM 节点更干净）
     const 所有人物 = st.party.filter((p) => p.在队)
     clear(APP舞台)
     for (const p of 所有人物) {
@@ -726,6 +769,8 @@ function renderGame(router) {
     APP载入计时器 = setInterval(刷, 200)
   }
 
+  let APP当前控制器 = null
+
   function APP渲染控制按钮(模式) {
     // 模式：'idle' | 'typing' | 'done'
     clear(APP控制区)
@@ -739,7 +784,89 @@ function renderGame(router) {
         },
       }, ['跳过'])
       APP控制区.appendChild(APP跳过)
+      // 取消：中断本回合请求，runTurn 整体回滚，玩家的选择不被消费。
+      // 没有它，模型挂起或写飞时玩家只能干等或刷新——刷新会丢掉最近回合上下文。
+      const APP取消 = el('button', {
+        onclick: () => { if (APP当前控制器) APP当前控制器.abort() },
+      }, ['取消本回合'])
+      APP控制区.appendChild(APP取消)
     }
+  }
+
+  function APP刷新顶栏() {
+    const v = gameViewModel({ state, 回合: null, 说话人: null })
+    setText(APP节点名, v.顶栏.地点)
+    setText(APP时间, v.顶栏.时间)
+    setText(APP海拔, v.顶栏.海拔 + 'm')
+    setText(APP天气, v.顶栏.天气)
+  }
+
+  // 原生操作共用的收尾：存档、刷面板、刷顶栏，并接住可能触发的结局。
+  // 返回 true 表示已经跳去结局页，调用方不要再动界面。
+  function APP结算原生操作(反馈) {
+    writeSave(localStorage, 'auto', state, journal)
+    APP渲染面板(state)
+    APP刷新顶栏()
+    setText(APP行动反馈, 反馈 || '')
+    const ending = checkEnding(state)
+    if (ending) {
+      applyEnding(state, ending)
+      writeSave(localStorage, 'auto', state, journal)
+      router.go('ending')
+      return true
+    }
+    APP渲染行动区()
+    return false
+  }
+
+  let APP求救待确认 = false
+
+  function APP渲染行动区() {
+    const avm = actionsViewModel(state)
+    clear(APP行动区)
+    const 排 = [
+      ['热食', () => {
+        const 前 = state.pc.体力
+        if (eatHot(state)) APP结算原生操作(`吃了顿热食，体力 ${前}→${state.pc.体力}`)
+      }],
+      ['冷食', () => {
+        const 前 = state.pc.体力
+        if (eatCold(state)) APP结算原生操作(`啃了点路餐，体力 ${前}→${state.pc.体力}`)
+      }],
+      ['休整', () => {
+        const 前 = state.pc.体力
+        rest(state)
+        const r = advanceTimeSlot(state)
+        APP结算原生操作(`原地休整了一个时段，体力 ${前}→${state.pc.体力}${r.跨天 ? '，已过夜' : ''}`)
+      }],
+    ]
+    for (const [键, 动作] of 排) {
+      const a = avm[键]
+      APP行动区.appendChild(el('button', {
+        disabled: (!a.可用 || APP进行中) || undefined,
+        title: a.原因 || undefined,
+        onclick: () => { if (!APP进行中) 动作() },
+      }, [a.文案]))
+    }
+    // 求救两段式确认——它直接终局，误触代价太大。设备是玩家花钱买的，
+    // 这个按钮就是它「保命」承诺兑现的地方。
+    const 救 = avm.求救
+    APP行动区.appendChild(el('button', {
+      disabled: (!救.可用 || APP进行中) || undefined,
+      title: 救.原因 || undefined,
+      onclick: () => {
+        if (APP进行中) return
+        if (!APP求救待确认) {
+          APP求救待确认 = true
+          APP渲染行动区()
+          setText(APP行动反馈, '再点一次确认——救援队来了，这一局就结束了。')
+          return
+        }
+        state.flags.已求救 = true
+        APP求救待确认 = false
+        APP结算原生操作('')
+      },
+    }, [APP求救待确认 ? '确认求救？' : 救.文案]))
   }
 
   async function APP执行回合(选中项) {
@@ -748,8 +875,10 @@ function renderGame(router) {
 
     // 清除上一次的错误提示
     clear(APP错误位)
-    // 请求中禁用全部选项
+    setText(APP行动反馈, '')
+    // 请求中禁用全部选项与原生操作
     APP渲染选项(APP当前选项, true)
+    APP渲染行动区()
     APP渲染控制按钮('typing')
 
     APP显示载入(true)
@@ -777,10 +906,11 @@ function renderGame(router) {
       }
     }, 40)
 
-    // 每次使用下一个随机数——以种子为基点，按已执行回合数推进 rng
-    // （保证同局种子下回放一致；APP最近回合.length 就是本回合前已执行的回合数）
-    const APP当前种子 = state.meta.随机种子 + APP会话.最近回合.length
-    const rng = makeRng(APP当前种子)
+    // 掷骰种子由引擎按「存档种子 + 回合序号」自行推导（见 turn.js 的 turnSeed）。
+    // 不在这里算——UI 层曾用「最近回合数组长度」当偏移，数组封顶在 4 之后
+    // 每回合掷出的点数就再也不变了。
+    const 控制器 = new AbortController()
+    APP当前控制器 = 控制器
 
     const r = await runTurn({
       state,
@@ -788,7 +918,7 @@ function renderGame(router) {
       选中项,
       最近回合: APP会话.最近回合,
       config: APP会话.config,
-      rng,
+      signal: 控制器.signal,
       // window.__testStreamImpl 仅供手动浏览器验证，不走真实 API
       streamImpl: typeof window !== 'undefined' && window.__testStreamImpl ? window.__testStreamImpl : undefined,
       onDelta: (块) => {
@@ -796,6 +926,7 @@ function renderGame(router) {
         tw.push(块)
       },
     })
+    APP当前控制器 = null
 
     APP进行中 = false
     APP显示载入(false)
@@ -809,17 +940,19 @@ function renderGame(router) {
       APP错误位.appendChild(APP错误)
       // 恢复选项可点，让玩家重试
       APP渲染选项(APP当前选项, false)
+      APP渲染行动区()
       APP渲染控制按钮('idle')
       return
     }
 
-    // 把本回合摘要推入 最近回合（保留最近 4 条）
-    APP会话.最近回合.push({
-      标题: r.标题 || '',
-      剧情摘要: (r.剧情 || '').slice(0, 200),
-      选项: (r.选项 || []).map((o) => o.文本 || '').join(' / '),
-      判定: r.判定 ? (r.判定.outcome === 'success' ? '成功' : '失败') : '',
-    })
+    // 把本回合摘要推入 最近回合（保留最近 4 条）。
+    // 必须是字符串——prompt.js 直接 join 拼进 user message，推对象进去的话
+    // 模型收到的上文就是三行 [object Object]，剧情脱轨就是这么来的。
+    APP会话.最近回合.push([
+      r.标题 ? `【${r.标题}】` : '',
+      (r.剧情 || '').slice(0, 200),
+      `（玩家选了「${选中项.文本 || 选中项.id}」，判定${r.判定 ? (r.判定.outcome === 'success' ? '成功' : '失败') : '—'}）`,
+    ].filter(Boolean).join('\n'))
     if (APP会话.最近回合.length > 4) APP会话.最近回合.shift()
 
     // 降级诊断。此前 UI 完全无视 r.降级 与 r.warnings——模型没按格式回时，
@@ -895,11 +1028,13 @@ function renderGame(router) {
     // 更新选项
     APP当前选项 = vm2.选项
     APP渲染选项(APP当前选项, false)
+    APP渲染行动区()
     APP渲染控制按钮('idle')
   }
 
-  // 初始渲染选项
+  // 初始渲染选项与原生操作
   APP渲染选项(APP初始选项, false)
+  APP渲染行动区()
   APP渲染控制按钮('idle')
 }
 
@@ -1020,7 +1155,7 @@ function renderPanel(vm) {
 // ──────────────────────────────────────────────────────────────────
 // renderEnding：结局页
 // ──────────────────────────────────────────────────────────────────
-function renderEnding() {
+function renderEnding(router) {
   const root = document.getElementById('screen-ending')
   clear(root)
 
@@ -1117,6 +1252,25 @@ function renderEnding() {
     }
     root.appendChild(APP好感区)
   }
+
+  // 再来一局。此前这一页没有任何按钮，自动存档又停在 phase=结局——
+  // 刷新永远回到这里，重开的唯一办法是手动清 localStorage。死胡同。
+  const APP再来 = el('button', {
+    class: 'primary',
+    onclick: () => {
+      deleteSave(localStorage, 'auto')
+      APP会话.state = null
+      APP会话.journal = null
+      APP会话.最近回合 = []
+      APP会话.队友 = []
+      APP会话.已重抽 = 0
+      APP会话.cart = {}
+      APP会话.种子 = Math.floor(Math.random() * 2 ** 31)
+      APP会话.draft = randomDraft(makeRng(APP会话.种子))
+      router.go('create')
+    },
+  }, ['再来一局 →'])
+  root.appendChild(el('div', { class: 'row', style: 'margin-top:16px' }, [APP再来]))
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -1133,18 +1287,23 @@ function 启动() {
   router.register('draw', { onEnter: () => renderDraw(router) })
   router.register('shop', { onEnter: () => renderShop(router) })
   router.register('game', { onEnter: () => renderGame(router) })
-  router.register('ending', { onEnter: () => renderEnding() })
+  router.register('ending', { onEnter: () => renderEnding(router) })
 
-  // 有存档就还原状态直接进主界面（刷新后进度还在）
+  // 有存档就还原状态。但配置不可用（换了浏览器、key 被清）时必须先落在
+  // 配置屏——此前见档就直进 game，第一回合报「还没填 API key」，且无路可回。
   const APP存档 = readSave(localStorage, 'auto')
-  if (APP存档 && APP存档.state && APP存档.state.phase !== '结局') {
+  if (APP存档 && APP存档.state) {
     APP会话.state = APP存档.state
     APP会话.journal = APP存档.journal
     APP会话.最近回合 = []
+  }
+
+  const 配置可用 = validateConfig(APP会话.config).ok
+  if (!配置可用) {
+    router.go('config')
+  } else if (APP会话.state && APP会话.state.phase !== '结局') {
     router.go('game')
-  } else if (APP存档 && APP存档.state && APP存档.state.phase === '结局') {
-    APP会话.state = APP存档.state
-    APP会话.journal = APP存档.journal
+  } else if (APP会话.state && APP会话.state.phase === '结局') {
     router.go('ending')
   } else {
     router.go('config')

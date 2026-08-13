@@ -18,7 +18,9 @@ export function drawCompanions(rng, 性格id) {
   const 结果 = []
   for (let i = 0; i < 抽取人数; i++) {
     const [id] = 池.splice(rollInt(rng, 0, 池.length - 1), 1)
-    结果.push({ npcId: id, 好感: initialAffinity(性格id, id) })
+    // 初始状态带上（王大鹏的膝伤、周涛的脚踝），createInitialState 会照抄进 state。
+    // 不带的话卡片上写「带伤」、state 里却是「正常」，模型两头看到的自相矛盾。
+    结果.push({ npcId: id, 好感: initialAffinity(性格id, id), 状态: getNpc(id).状态 })
   }
   return 结果
 }

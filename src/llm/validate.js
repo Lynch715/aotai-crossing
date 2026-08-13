@@ -11,6 +11,10 @@ export const CLAMP_TABLE = {
 
 const 合法选项id = new Set(['A', 'B', 'C', 'D'])
 
+function 现有装备(state, gearId) {
+  return Array.isArray(state?.pack) && state.pack.some((p) => p.gearId === gearId)
+}
+
 // LLM 用中文名指代人物，映射回 id；id 直传也认。
 export function resolveNpc(name) {
   if (!name || typeof name !== 'string') return null
@@ -101,13 +105,48 @@ export function clampRequire(类型, require) {
   return { require: out, warnings }
 }
 
+const 入队上限 = 4
+const 伤病名上限 = 12
+const 合法严重度 = new Set(['轻', '重'])
+
 // 把 LLM 的 STATE 提议过一遍筛子。所有越权都记 warning，但不打断——游戏要能继续。
 export function validateProposal(state, proposal) {
-  const out = { 好感变更: [], 说话人: null, 离队: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
+  const out = { 好感变更: [], 说话人: null, 离队: [], 入队: [], 伤病新增: [], 伤病已处理: [], 记忆: [], 伏笔: { 新增: [], 已收: [] }, 选项: [], 去向: null, warnings: [] }
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return out
   // 「从不抛异常」得对 state 也成立，否则调用方传进半截状态时一样白屏。
   const 队伍 = Array.isArray(state?.party) ? state.party : []
   const 当前节点 = state?.place?.nodeId ?? null
+
+  // —— 入队（先算：同一回合里模型常「入队 + 给新人好感/让新人说话」一起报，
+  // 后面的在队判定要把本回合刚入队的人也算上）——
+  const 新入队 = new Set()
+  for (const item of Array.isArray(proposal.入队) ? proposal.入队 : []) {
+    if (!item || typeof item !== 'object') continue
+    const npcId = resolveNpc(item.npc)
+    if (!npcId) {
+      out.warnings.push(`入队提议里认不出这个人：${item.npc}`)
+      continue
+    }
+    const 旧 = 队伍.find((p) => p.npcId === npcId)
+    if (旧 && 旧.在队) {
+      out.warnings.push(`${item.npc} 已经在队，忽略重复入队`)
+      continue
+    }
+    if (旧 && !旧.在队) {
+      out.warnings.push(`${item.npc} 已经离队，离队不可逆，入队提议已驳回`)
+      continue
+    }
+    const 现有人数 = 队伍.filter((p) => p.在队).length + 新入队.size
+    if (现有人数 >= 入队上限) {
+      out.warnings.push(`队伍已满 ${入队上限} 人，${item.npc} 的入队提议已驳回`)
+      continue
+    }
+    新入队.add(npcId)
+    out.入队.push({ npcId, 因: String(item.因 || '').slice(0, 30) })
+  }
+
+  const 在队或将入队 = (npcId) =>
+    队伍.some((p) => p.npcId === npcId && p.在队) || 新入队.has(npcId)
 
   for (const item of Array.isArray(proposal.好感) ? proposal.好感 : []) {
     if (!item || typeof item !== 'object') continue
@@ -116,7 +155,7 @@ export function validateProposal(state, proposal) {
       out.warnings.push(`好感提议引用了未知人物「${item.npc}」，已驳回`)
       continue
     }
-    if (!队伍.some((p) => p.npcId === npcId && p.在队)) {
+    if (!在队或将入队(npcId)) {
       out.warnings.push(`${item.npc} 不在队，好感提议已驳回`)
       continue
     }
@@ -133,10 +172,57 @@ export function validateProposal(state, proposal) {
     const npcId = resolveNpc(proposal.说话人)
     if (!npcId) {
       out.warnings.push(`说话人认不出这个人：${proposal.说话人}`)
-    } else if (!队伍.some((p) => p.npcId === npcId && p.在队)) {
+    } else if (!在队或将入队(npcId)) {
       out.warnings.push(`说话人 ${proposal.说话人} 不在队伍里`)
     } else {
       out.说话人 = npcId
+    }
+  }
+
+  // —— 伤病。主角的伤病是「重伤拖 2 天致死」结局与医药包的唯一事件源。
+  // 新增每回合最多一条（防模型一句话打断三根骨头）；处理必须包里真有医药包。
+  const 伤病 = proposal.伤病
+  if (伤病 && typeof 伤病 === 'object' && !Array.isArray(伤病)) {
+    const 现有伤 = Array.isArray(state?.pc?.伤病) ? state.pc.伤病 : []
+    let 已收新伤 = false
+    for (const item of Array.isArray(伤病.新增) ? 伤病.新增 : []) {
+      if (!item || typeof item !== 'object') continue
+      const 名称 = String(item.名称 || '').trim().slice(0, 伤病名上限)
+      if (!名称) continue
+      if (!合法严重度.has(item.严重度)) {
+        out.warnings.push(`伤病「${名称}」的严重度只能是 轻/重，已驳回`)
+        continue
+      }
+      if (已收新伤) {
+        out.warnings.push(`一回合最多新增一处伤病，「${名称}」已驳回`)
+        continue
+      }
+      if (现有伤.some((w) => w.名称 === 名称 && !w.已处理)) {
+        out.warnings.push(`「${名称}」已在伤病列表里，忽略重复`)
+        continue
+      }
+      let 严重度 = item.严重度
+      // 护膝对膝伤的抵抗：重伤降为轻伤。这是「膝伤类事件抵抗」这行商品说明
+      // 兑现的地方——不在这里兑现，护膝就是 0.15kg 的死重。
+      if (严重度 === '重' && 名称.includes('膝') && 现有装备(state, 'knee_brace')) {
+        严重度 = '轻'
+        out.warnings.push(`护膝挡了一下：「${名称}」由重伤降为轻伤`)
+      }
+      out.伤病新增.push({ 名称, 严重度 })
+      已收新伤 = true
+    }
+    for (const 名 of Array.isArray(伤病.已处理) ? 伤病.已处理 : []) {
+      const t = String(名 || '').trim()
+      if (!t) continue
+      if (!现有伤.some((w) => w.名称 === t && !w.已处理)) {
+        out.warnings.push(`要处理的伤病「${t}」不存在或已处理，已驳回`)
+        continue
+      }
+      if (!现有装备(state, 'first_aid')) {
+        out.warnings.push(`包里没有医药包，无法处理「${t}」`)
+        continue
+      }
+      out.伤病已处理.push(t)
     }
   }
 
