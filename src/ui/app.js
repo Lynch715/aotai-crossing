@@ -17,7 +17,7 @@ import { rollSeason, getSeason } from '../data/seasons.js'
 import { getNpc } from '../data/npcs.js'
 import { makeRng } from '../engine/rng.js'
 import { createInitialState, addItem } from '../engine/state.js'
-import { getNode } from '../data/route.js'
+import { getNode, nextMainNode } from '../data/route.js'
 import { recordNode } from '../engine/journal.js'
 import { eatHot, eatCold, rest, advanceTimeSlot } from '../engine/consume.js'
 import { checkEnding, applyEnding } from '../engine/ending.js'
@@ -692,7 +692,9 @@ function renderGame(router) {
   // 但导入会增加一个模块依赖，而 gameViewModel 中 选项 在 回合==null 时返回 []。
   // 计划：让首次进入时显示「开始徒步」的单一选项。
   const APP初始选项 = [
-    { id: 'start', 文本: '出发上路！', 类型: '徒步', require: {}, cost: {}, 可点: true, 档: '达标', 概率文案: '', 理由: '' },
+    { id: 'start', 文本: '出发上路！', 类型: '徒步', require: {}, cost: {},
+      targetNodeId: nextMainNode(state.place.nodeId)?.id || null,
+      可点: true, 档: '达标', 概率文案: '', 理由: '' },
   ]
 
   // 当前待选选项（回合结束后更新）
@@ -1194,6 +1196,26 @@ function renderPanel(vm) {
   APP现金行.appendChild(APP现金值)
   APP面板.appendChild(APP现金行)
 
+  // 生存状态必须常驻可见，避免高反/迷路/危险露宿只藏在剧情里。
+  const APP营地行 = el('div', { class: 'game-stat-row', style: 'margin-top:8px' })
+  APP营地行.appendChild(el('span', { class: 'game-stat-label', text: '扎营' }))
+  APP营地行.appendChild(el('span', {
+    class: vm.营地.可扎营 ? 'game-stat-val' : 'game-stat-val warn',
+    text: vm.营地.可扎营 ? (vm.营地.有水源 ? '可扎营 · 有水' : '可扎营 · 无水') : '此处不可扎营',
+  }))
+  APP面板.appendChild(APP营地行)
+
+  if (vm.伤病.length) {
+    const APP伤病行 = el('div', { class: 'notice warn', style: 'margin-top:8px' })
+    setText(APP伤病行, '状态：' + vm.伤病.map((w) => `${w.名称}（${w.严重度}）`).join('、'))
+    APP面板.appendChild(APP伤病行)
+  }
+  if (vm.风险.迷路次数 || vm.风险.恶劣天气暴露次数) {
+    const APP风险行 = el('div', { class: 'muted', style: 'margin-top:6px' })
+    setText(APP风险行, `迷路 ${vm.风险.迷路次数} 次 · 恶劣天气暴露 ${vm.风险.恶劣天气暴露次数} 次`)
+    APP面板.appendChild(APP风险行)
+  }
+
   // 同行者
   if (vm.同行者.length > 0) {
     const APP同行者标题 = el('div', { class: 'game-stat-row', style: 'margin-top:10px' })
@@ -1303,6 +1325,9 @@ function renderEnding(router) {
   const APP受伤行 = el('div', { class: 'recap-item' })
   setText(APP受伤行, '受伤：' + vm.回顾.受伤次数 + ' 次')
   APP基本回顾.appendChild(APP受伤行)
+  const APP风险回顾 = el('div', { class: 'recap-item' })
+  setText(APP风险回顾, `迷路：${vm.回顾.迷路次数} 次 · 恶劣天气暴露：${vm.回顾.恶劣天气暴露次数} 次`)
+  APP基本回顾.appendChild(APP风险回顾)
   const APP余粮行 = el('div', { class: 'recap-item' })
   setText(APP余粮行, '剩余主粮：' + vm.回顾.剩余主粮 + ' 份')
   APP基本回顾.appendChild(APP余粮行)

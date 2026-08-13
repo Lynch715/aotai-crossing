@@ -127,7 +127,7 @@ test('地名前缀必须唯一才认，含糊的一律驳回', () => {
   assert.equal(validateProposal(在拔仙台, { 去向建议: '大爷海' }).去向, 'dayehai', '精确名该认')
   assert.equal(validateProposal(在拔仙台, { 去向建议: '大' }).去向, null, '含糊前缀必须驳回')
   // 唯一前缀仍然认
-  assert.equal(validateProposal({ ...状态(), place: { nodeId: 'yaowangdong', 海拔: 3360 } }, { 去向建议: '麦秸' }).去向, 'maijieling')
+  assert.equal(validateProposal({ ...状态(), place: { nodeId: 'aoshan', 海拔: 3475 } }, { 去向建议: '麦秸' }).去向, 'maijieling')
 })
 
 test('代价被夹取：负值归零，超限截断，未知项剔除', () => {

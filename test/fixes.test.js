@@ -121,7 +121,7 @@ test('#7 断粮之夜按欠缺份数扣体力', async () => {
     config: 假配置, streamImpl: 极简回复,
   })
   // 步进 -6，露天睡 +12，欠 2 份主粮 -16 → 40
-  assert.equal(s.pc.体力, 40, `断粮惩罚没生效：${s.pc.体力}`)
+  assert.equal(s.pc.体力, 22, `断粮、露宿与失温惩罚没生效：${s.pc.体力}`)
   assert.ok(r.ok)
 })
 
@@ -369,16 +369,16 @@ test('system prompt 有连贯性与选项扣题的硬规则', () => {
 test('季节事件按 节点+季节 触发，一局一次，登场人物已在队则跳过', async () => {
   const { pickEvent, EVENTS } = await import('../src/data/events.js')
   const s = 局面()
-  s.place = { nodeId: 'yaowangdong', 海拔: 3360 }
+  s.place = { nodeId: 'aoshan', 海拔: 3475 }
   const e = pickEvent(s)
-  assert.equal(e.id, 'meet_taxue', '药王洞应触发踏雪登场')
+  assert.equal(e.id, 'meet_taxue', '鳌山至药王洞段应触发踏雪登场')
 
   s.flags.触发过的事件id = ['meet_taxue']
-  assert.equal(pickEvent(s), null, '已触发不得重复')
+  assert.equal(pickEvent(s).id, 'aoshan_cloud', '人物事件触发后仍可演出该路段天气事件')
 
   s.flags.触发过的事件id = []
   s.party.push({ npcId: 'taxue', 好感: 30, 状态: '幸存', 在队: true })
-  assert.equal(pickEvent(s), null, '踏雪已在队就不再登场')
+  assert.equal(pickEvent(s).id, 'aoshan_cloud', '踏雪已在队就不再登场，但路段事件仍保留')
 
   // 季节匹配：冬季的东跑马梁是暴风雪，秋季不是
   const 冬 = 局面()
@@ -447,31 +447,31 @@ test('勉强档赌赢经验 +2 封顶 100，达标与失败不涨', async () => 
   assert.equal(await 跑一把({ 经验: 43 }, () => 0.99), 38, '赌输不涨')
 })
 
-test('主线完成度：起点 1/27，苗圃等价起点，下撤点隐藏', async () => {
+test('主线完成度：18 个决策节点对应六天，苗圃等价起点，下撤点隐藏', async () => {
   const { mainProgress } = await import('../src/data/route.js')
-  assert.deepEqual(mainProgress('tangkou'), { 序号: 1, 总数: 27 })
-  assert.deepEqual(mainProgress('miaopu'), { 序号: 1, 总数: 27 })
-  assert.deepEqual(mainProgress('baxiantai'), { 序号: 23, 总数: 27 })
+  assert.deepEqual(mainProgress('tangkou'), { 序号: 1, 总数: 18 })
+  assert.deepEqual(mainProgress('miaopu'), { 序号: 1, 总数: 18 })
+  assert.deepEqual(mainProgress('baxiantai'), { 序号: 14, 总数: 18 })
   assert.equal(mainProgress('hetaoping'), null)
   const { gameViewModel } = await import('../src/ui/screen-game.js')
   const s = 局面()
-  assert.equal(gameViewModel({ state: s, 回合: null, 说话人: null }).顶栏.行程, '行程 7/27')
+  assert.equal(gameViewModel({ state: s, 回合: null, 说话人: null }).顶栏.行程, '行程 6/18')
 })
 
 // ── 七阶段路线重组 ────────────────────────────────────────────────
 
-test('分段节点接进主线，苗圃有直插盆景园的近路', async () => {
+test('决策节点压缩接进主线，子地点留在叙事内，苗圃有直插盆景园的近路', async () => {
   const { isAdjacent } = await import('../src/data/route.js')
   assert.ok(isAdjacent('shuiwozi', 'feijiliang1'))
-  assert.ok(isAdjacent('feijiliang1', 'feijiliang2'))
+  assert.ok(isAdjacent('feijiliang1', 'feijiliang3'))
   assert.ok(isAdjacent('feijiliang3', 'yingdi2800'))
-  assert.ok(isAdjacent('jiuchongshihai3', 'dongyuan'))
+  assert.ok(isAdjacent('jiuchongshihai2', 'dongyuan'))
   assert.ok(isAdjacent('miaopu', 'yingdi2900'), '苗圃近路：跳过火烧坡')
   assert.ok(isAdjacent('miaopu', 'huoshaopo'), '苗圃也可走经典线')
-  assert.ok(!isAdjacent('shuiwozi', 'feijiliang2'), '不能跳段')
+  assert.ok(!isAdjacent('shuiwozi', 'feijiliang3'), '不能跳过飞机梁入口')
 })
 
-test('旧档迁移 v1→v2：老节点 id 映射到分段首段，flags 补最低体力', async () => {
+test('旧档迁移 v1→v3：老节点 id 映射到当前决策节点，并补风险记账', async () => {
   const { migrateSave } = await import('../src/ui/save.js')
   const 老包 = {
     版本: 1, 摘要: 'x',
@@ -481,8 +481,10 @@ test('旧档迁移 v1→v2：老节点 id 映射到分段首段，flags 补最�
   const r = migrateSave(老包)
   assert.ok(r.可用 && r.迁移过)
   assert.equal(r.包.state.place.nodeId, 'feijiliang1')
-  assert.deepEqual(r.包.journal.已过节点, ['tangkou', 'jiuchongshihai1'])
+  assert.deepEqual(r.包.journal.已过节点, ['tangkou', 'jiuchongshihai2'])
   assert.equal(r.包.state.flags.最低体力, 66)
+  assert.equal(r.包.state.flags.迷路次数, 0)
+  assert.equal(r.包.state.flags.恶劣天气暴露次数, 0)
 })
 
 test('阶段事件：西源必提示石海，拔仙台演出登顶≠通关', async () => {

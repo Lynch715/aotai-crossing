@@ -54,6 +54,7 @@ const GAME_余量告警线 = 20
 export function panelViewModel(state) {
   const 比 = state.carry.当前 / state.carry.上限
   const 档 = state.carry.当前 > state.carry.上限 ? '超重' : 比 >= GAME_负重偏重线 ? '偏重' : '正常'
+  const node = getNode(state.place.nodeId)
 
   return {
     名字: state.pc.名字,
@@ -65,6 +66,12 @@ export function panelViewModel(state) {
     体力告警: state.pc.体力 < GAME_体力告警线,
     负重: { 当前: state.carry.当前, 上限: state.carry.上限, 比: Math.min(1, 比), 档 },
     现金: state.money,
+    营地: { 可扎营: !!node?.可扎营, 有水源: !!node?.有水源 },
+    伤病: (state.pc.伤病 || []).filter((w) => !w.已处理),
+    风险: {
+      迷路次数: state.flags?.迷路次数 || 0,
+      恶劣天气暴露次数: state.flags?.恶劣天气暴露次数 || 0,
+    },
     同行者: activeParty(state).map((p) => {
       const npc = getNpc(p.npcId)
       return { npcId: p.npcId, 名称: npc ? npc.名称 : p.npcId, 好感: p.好感, 分级: affinityLabel(p.好感), 状态: p.状态 }

@@ -44,9 +44,7 @@ export function migrateSave(包) {
   if (包.版本 > STATE_VERSION) {
     return { 可用: false, 原因: `存档版本 ${包.版本} 高于当前 ${STATE_VERSION}，可能来自更新的版本` }
   }
-  if (包.版本 === STATE_VERSION) {
-    return { 可用: true, 迁移过: false, 包 }
-  }
+  if (包.版本 === STATE_VERSION) return { 可用: true, 迁移过: false, 包 }
   const 新 = JSON.parse(JSON.stringify(包))
   // v1 → v2：飞机梁/金字塔/九重石海拆成了分段节点，老档的位置与足迹
   // 映射到对应首段；flags 补 最低体力。不迁移的话，老档会站在一个
@@ -59,6 +57,26 @@ export function migrateSave(包) {
     }
     if (新.state?.flags && typeof 新.state.flags.最低体力 !== 'number') {
       新.state.flags.最低体力 = 新.state.pc?.体力 ?? 100
+    }
+  }
+  // v2 → v3：旧路线中的隐藏子节点映射到新的决策节点；补风险记账字段。
+  if (新.版本 < 3) {
+    const 改名 = {
+      yaowangdong: 'aoshan',
+      feijiliang2: 'feijiliang1',
+      jinzita2: 'jinzita1', jinzita3: 'jinzita1', xiyuan: 'jinzita1',
+      jiuchongshihai1: 'jiuchongshihai2', jiuchongshihai3: 'jiuchongshihai2',
+      leigongmiao: 'wanxianzhen', dongpaomaliang: 'wanxianzhen',
+    }
+    if (新.state?.place && 改名[新.state.place.nodeId]) {
+      新.state.place.nodeId = 改名[新.state.place.nodeId]
+    }
+    if (Array.isArray(新.journal?.已过节点)) {
+      新.journal.已过节点 = 新.journal.已过节点.map((id) => 改名[id] || id)
+    }
+    if (新.state?.flags) {
+      if (typeof 新.state.flags.迷路次数 !== 'number') 新.state.flags.迷路次数 = 0
+      if (typeof 新.state.flags.恶劣天气暴露次数 !== 'number') 新.state.flags.恶劣天气暴露次数 = 0
     }
   }
   新.版本 = STATE_VERSION

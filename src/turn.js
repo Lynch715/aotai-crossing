@@ -1,12 +1,12 @@
-import { snapshot, restore, consumeItem } from './engine/state.js'
+import { snapshot, restore, consumeItem, hasItem } from './engine/state.js'
 import { makeRng } from './engine/rng.js'
-import { judgeOption } from './engine/threshold.js'
+import { judgeOption, gapFor } from './engine/threshold.js'
 import { applyStepCost, advanceTimeSlot, stepStaminaCost, 调整体力 } from './engine/consume.js'
 import { applyAffinityDelta, initialAffinity } from './engine/affinity.js'
 import { npcLeaves, npcJoins } from './engine/party.js'
 import { checkEnding, applyEnding } from './engine/ending.js'
 import { recordNode, recordEvent, addForeshadow, resolveForeshadow, compressJournal } from './engine/journal.js'
-import { getNode } from './data/route.js'
+import { getNode, nextMainNode } from './data/route.js'
 import { getNpc } from './data/npcs.js'
 import { pickEvent } from './data/events.js'
 import { buildSystemPrompt, buildUserMessage, buildRepairMessage } from './llm/prompt.js'
@@ -33,6 +33,56 @@ function 就地覆盖(target, source) {
 const 时段表 = ['早', '中', '晚']
 const 判定失败惩罚 = 5
 const 处理伤病耗材 = 25
+
+function 稳妥推进选项(state, id = 'D') {
+  const next = nextMainNode(state.place.nodeId)
+  if (!next) return { id, 文本: '沿既定路线稳妥前进', 类型: '徒步', require: {}, cost: {} }
+  return {
+    id, 文本: `沿路标稳妥前往${next.名称}`, 类型: '徒步', require: {}, cost: {},
+    targetNodeId: next.id,
+  }
+}
+
+export function ensureProgressOption(options, state) {
+  const out = Array.isArray(options) ? options.map((o) => ({ ...o })) : []
+  // 只有引擎自己绑定了 targetNodeId 的选项才算“确定能推进”。模型写一句
+  // “继续走”并不代表它会在 STATE 里交回合法去向，不能拿这种文案当保底。
+  const 有可行推进 = out.some((o) => o.targetNodeId && o.类型 !== '社交' && gapFor(o.require, state).gap <= 10)
+  if (有可行推进 || !nextMainNode(state.place.nodeId)) return out
+  const safe = 稳妥推进选项(state, out.some((o) => o.id === 'D') ? 'D' : 'A')
+  const i = out.findIndex((o) => o.id === safe.id)
+  if (i >= 0) out[i] = safe
+  else out.push(safe)
+  return out
+}
+
+function applyTravelRisks(state, 选中项, 判定, rng) {
+  const notes = []
+  if (选中项.类型 === '社交' || 判定.outcome !== 'success') return { 迷路: false, notes }
+
+  if ((state.weather?.等级 ?? 0) >= 6) {
+    state.flags.恶劣天气暴露次数 = (state.flags.恶劣天气暴露次数 || 0) + 1
+    notes.push('恶劣天气中行军，体力消耗增加')
+  }
+
+  if (state.place.海拔 >= 3400 && !state.flags.高海拔过夜数 &&
+      !(state.pc.伤病 || []).some((w) => w.名称 === '高反不适' && !w.已处理) && rng() < 0.25) {
+    state.pc.伤病.push({ 名称: '高反不适', 严重度: '轻', 起始day: state.clock.day, 已处理: false })
+    notes.push('快速升高后出现高反不适，后续行军更吃力')
+  }
+
+  if (state.place.nodeId === 'wanxianzhen') {
+    const 有定位 = hasItem(state, 'gps') || hasItem(state, 'map_compass')
+    const chance = 有定位 ? 0.05 : ((state.weather?.等级 ?? 0) >= 4 ? 0.55 : 0.35)
+    if (rng() < chance) {
+      state.flags.迷路次数 = (state.flags.迷路次数 || 0) + 1
+      调整体力(state, -8)
+      notes.push('在万仙阵偏离路线，额外耗费体力，本回合未能推进')
+      return { 迷路: true, notes }
+    }
+  }
+  return { 迷路: false, notes }
+}
 
 // 连模型重写一次都还是没有正文时的最后保底。宁可平淡，不许空白——
 // 「每一个动作之后都有剧情」是硬承诺，正文区一片空白就是违约。
@@ -83,15 +133,17 @@ export async function runTurn({
 
     // rng 缺省时按「存档种子 + 回合序号」推导（见 turnSeed），保证同一存档
     // 重放一致，且每回合掷出的点数各不相同。
-    const 判定 = judgeOption(选中项, state, rng || makeRng(turnSeed(state)))
+    const 回合rng = rng || makeRng(turnSeed(state))
+    const 判定 = judgeOption(选中项, state, 回合rng)
     const 体力前 = state.pc.体力
     const 金钱前 = state.money
 
     // —— 硬资源结算：LLM 完全不参与 ——
     // 选项申报的 cost 是「这一步总共多累」，与基础步进消耗取大，不叠加——
     // 叠加会把每个 cost 都变相加价一个基础步进，跟界面上标的价对不上。
-    const 基础步进 = stepStaminaCost(state)
-    applyStepCost(state)
+    const 行军 = 选中项.类型 !== '社交'
+    const 基础步进 = stepStaminaCost(state, { 行军 })
+    applyStepCost(state, { 行军 })
     if (typeof 净代价.体力 === 'number' && 净代价.体力 > 基础步进) {
       调整体力(state, -(净代价.体力 - 基础步进))
     }
@@ -112,6 +164,8 @@ export async function runTurn({
     // 时段推进：1 个基础时段 + 选项申报的额外时段。跨天连锁（睡眠、日粮、
     // 断粮惩罚）全在 advanceTimeSlot 里，这里只收集要告诉模型的事实。
     const 推进备注 = []
+    const 路险 = applyTravelRisks(state, 选中项, 判定, 回合rng)
+    推进备注.push(...路险.notes)
     const 推进次数 = 1 + (typeof 净代价.时段 === 'number' ? Math.max(0, Math.floor(净代价.时段)) : 0)
     for (let i = 0; i < 推进次数; i++) {
       const r = advanceTimeSlot(state)
@@ -206,7 +260,7 @@ export async function runTurn({
     // —— 降级：正文保留，本回合不结算 ——
     if (parsed.state === null) {
       结果.降级 = true
-      结果.选项 = FALLBACK_OPTIONS.map((o) => ({ ...o }))
+      结果.选项 = [稳妥推进选项(state, 'A'), ...FALLBACK_OPTIONS.slice(1).map((o) => ({ ...o }))]
       结果.warnings.push(`STATE 补救 ${MAX_REPAIR} 次仍失败，本回合不结算`)
       结果.ending = checkEnding(state)
       if (结果.ending) applyEnding(state, 结果.ending)
@@ -260,11 +314,12 @@ export async function runTurn({
     // 移动的两道闸：社交回合不移动（蹲下喂口水不该把人挪到下一个路段），
     // 判定失败也不移动（横切没成怎么会已经到了对面）。模型在这两种回合
     // 里照样爱写去向建议，校验只查相邻性管不到这层语义，得在这里拦。
-    const 允许移动 = 选中项.类型 !== '社交' && 判定.outcome === 'success'
-    if (v.去向 && 允许移动) {
-      state.place.nodeId = v.去向
-      state.place.海拔 = getNode(v.去向).海拔
-      recordNode(journal, v.去向)
+    const 允许移动 = 选中项.类型 !== '社交' && 判定.outcome === 'success' && !路险.迷路
+    const 实际去向 = v.去向 || 选中项.targetNodeId || null
+    if (实际去向 && 允许移动) {
+      state.place.nodeId = 实际去向
+      state.place.海拔 = getNode(实际去向).海拔
+      recordNode(journal, 实际去向)
     }
     if (parsed.state.天气建议) {
       // 这是唯一不经 validateProposal 的 LLM 字段（纯展示、不参与任何判定），
@@ -289,6 +344,7 @@ export async function runTurn({
         o.cost = {}
       }
     }
+    结果.选项 = ensureProgressOption(结果.选项, state)
 
     compressJournal(journal)
 

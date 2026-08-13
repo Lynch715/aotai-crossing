@@ -19,8 +19,8 @@ export const EVENTS = [
   // ══ 第二阶段：初见真正的鳌太 ══
   { id: 'aoshan_cloud', 节点: 'aoshan', 季节: null, 登场: null,
     指令: '鳌山导航架，海拔3475米，第一个大型地标。演出山梁突然被云雾吞没、大风灌进衣领的压迫感——这是鳌太给的下马威。选项应包含 继续前进/原地等云开/退回避风处 之类的抉择。' },
-  { id: 'meet_taxue', 节点: 'yaowangdong', 季节: null, 登场: 'taxue',
-    指令: '药王洞里已经有人——独行的踏雪正在休整。让她登场：话不多但句句是干货，可借她之口聊四季穿越的门道。若相谈投缘，可在 STATE 里提议她入队。' },
+  { id: 'meet_taxue', 节点: 'aoshan', 季节: null, 登场: 'taxue',
+    指令: '鳌山导航架之后路过药王洞，洞里已经有人——独行的踏雪正在休整。让她登场：话不多但句句是干货，也要带出导航架一带突然起雾和大风的压力。若相谈投缘，可在 STATE 里提议她入队。' },
   { id: 'maijieling_ridge', 节点: 'maijieling', 季节: null, 登场: null,
     指令: '麦秸岭刀刃山脊，第一次真正的地形考验：风速、负重、每个人的状态都摆上台面。演出横切时的紧张，谁状态差就让谁露怯。' },
   { id: 'meet_hikers_shuiwozi', 节点: 'shuiwozi', 季节: null, 登场: null,
@@ -75,8 +75,8 @@ export const EVENTS = [
     指令: '白化天：天地一色，石堆与天空的边界消失了。演出这种令人心里发毛的迷失感。' },
   { id: 'lost_wanxianzhen', 节点: 'wanxianzhen', 季节: null, 登场: null,
     指令: '万仙阵是全线最易迷路的石堆群：能见度有限、路标带断了线索、石堆看着都一样。演出一次真实的迷向，队伍需要拿主意怎么重新找路。' },
-  { id: 'meet_mengshe', 节点: 'leigongmiao', 季节: null, 登场: 'mengshe',
-    指令: '雷公庙：破败石屋、被遗弃的气罐、撕裂的雨衣、墙上前人留下的字迹——无人区的历史感。猛蛇过江正靠在残墙边休息，状态明显透支却嘴硬。让他登场，偏执与追求极限的劲头要写出来；若剧情自然，可提议他入队。' },
+  { id: 'meet_mengshe', 节点: 'wanxianzhen', 季节: null, 登场: 'mengshe',
+    指令: '队伍从万仙阵辨路后经过雷公庙：破败石屋、被遗弃的气罐和撕裂的雨衣。猛蛇过江正靠在残墙边休息，状态明显透支却嘴硬。让他登场；若剧情自然，可提议他入队。' },
   { id: 'xia_thunder_dongpaomaliang', 节点: 'dongpaomaliang', 季节: '夏季', 登场: null,
     指令: '夏季午后，东跑马梁的雷暴说来就来，广阔草甸上没有任何遮蔽。演出雷声逼近、全队急寻低处的紧张。' },
   { id: 'dong_blizzard_dongpaomaliang', 节点: 'dongpaomaliang', 季节: '冬季', 登场: null,
@@ -103,10 +103,21 @@ export const EVENTS = [
 // 登场人物从未进过队（进过又离开的不再登场——离队不可逆）。
 export function pickEvent(state) {
   const 已触发 = state.flags?.触发过的事件id || []
-  return EVENTS.find((e) =>
+  const 候选 = EVENTS.filter((e) =>
     e.节点 === state.place.nodeId &&
     (e.季节 === null || e.季节 === state.meta.季节) &&
     !已触发.includes(e.id) &&
     (!e.登场 || !(state.party || []).some((p) => p.npcId === e.登场))
-  ) || null
+  )
+  // 战略节点的事件必须在第一次抵达时兑现，否则会被季节风味覆盖，导致
+  // 下撤提示、石海路线选择、登顶/进文明区等关键玩法信息错过。
+  const 核心事件 = new Set([
+    'lingniu_2800', 'xiyuan_warning', 'shihai2_choice',
+    'baxiantai_summit', 'dayehai_civilization',
+  ])
+  // 重要人物只登场一次，优先级最高；其后是核心玩法事件，再到本季风味。
+  return 候选.find((e) => e.登场) ||
+    候选.find((e) => 核心事件.has(e.id)) ||
+    候选.find((e) => e.季节 === state.meta.季节) ||
+    候选[0] || null
 }

@@ -1,8 +1,8 @@
 import { getNode } from '../data/route.js'
 import { tierOf, getGear } from '../data/gear.js'
 
-// v2：飞机梁/金字塔/九重石海拆分为分段节点，flags 增加 最低体力
-export const STATE_VERSION = 2
+// v3：路线压缩为 6 天决策节点；新增累计风险计数，供面板和结算使用。
+export const STATE_VERSION = 3
 
 // 唯一权威状态。LLM 永远碰不到这个对象，只能提议；提议经 llm/validate.js 校验后由引擎应用。
 export function createInitialState(opts) {
@@ -24,7 +24,11 @@ export function createInitialState(opts) {
     // 队友初始状态照抄人物表（王大鹏的膝伤、周涛的脚踝）。此前一律写「正常」，
     // 抽卡卡片和 system prompt 里说他带伤、user message 里又说他正常，模型无所适从。
     party: opts.队友.map((t) => ({ npcId: t.npcId, 好感: t.好感, 状态: t.状态 || '正常', 在队: true })),
-    flags: { 已求救: false, 已下撤: false, 高海拔过夜数: 0, 失温连败: 0, 触发过的事件id: [], 最低体力: 100 },
+    flags: {
+      已求救: false, 已下撤: false, 高海拔过夜数: 0, 失温连败: 0,
+      迷路次数: 0, 恶劣天气暴露次数: 0,
+      触发过的事件id: [], 最低体力: 100,
+    },
     ending: null,
   }
 

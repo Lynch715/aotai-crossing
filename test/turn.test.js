@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { runTurn, FALLBACK_OPTIONS, MAX_REPAIR } from '../src/turn.js'
+import { runTurn, FALLBACK_OPTIONS, MAX_REPAIR, ensureProgressOption } from '../src/turn.js'
 import { createInitialState } from '../src/engine/state.js'
 import { createJournal } from '../src/engine/journal.js'
 import { STATE_MARKER } from '../src/llm/parser.js'
@@ -125,6 +125,49 @@ test('合法去向被应用，海拔跟着更新（判定成功的徒步回合�
   })
   assert.equal(s.place.nodeId, 'shuiwozi')
   assert.equal(s.place.海拔, 3100)
+})
+
+test('模型漏写去向时，玩家点引擎保底推进仍会移动', async () => {
+  const s = 局面()
+  const 无去向 = 好回复.replace('"去向建议":"水窝子营地"', '"去向建议":""')
+  await 跑(s, createJournal(), {
+    streamImpl: 假客户端(无去向),
+    选中项: { id: 'D', 文本: '沿路标稳妥前往水窝子营地', 类型: '徒步', require: {}, cost: {}, targetNodeId: 'shuiwozi' },
+  })
+  assert.equal(s.place.nodeId, 'shuiwozi')
+})
+
+test('四个模型选项都不保证移动时，引擎替换出一个可执行的主线选项', () => {
+  const s = 局面()
+  const options = [
+    { id: 'A', 文本: '聊聊', 类型: '社交', require: {}, cost: {} },
+    { id: 'B', 文本: '观察云层', 类型: '徒步', require: {}, cost: {} },
+    { id: 'C', 文本: '原地等待', 类型: '徒步', require: { 经验: 99 }, cost: {} },
+    { id: 'D', 文本: '清点背包', 类型: '徒步', require: {}, cost: {} },
+  ]
+  const fixed = ensureProgressOption(options, s)
+  const safe = fixed.find((o) => o.targetNodeId)
+  assert.equal(safe.targetNodeId, 'shuiwozi')
+  assert.equal(safe.类型, '徒步')
+  assert.deepEqual(safe.require, {})
+})
+
+test('万仙阵迷路由引擎结算：扣体力、记次数、当回合不移动', async () => {
+  const s = 局面()
+  s.place = { nodeId: 'wanxianzhen', 海拔: 3560 }
+  s.weather = { 状态: '浓雾大风', 等级: 7 }
+  const 到拔仙台 = 好回复.replace('"去向建议":"水窝子营地"', '"去向建议":"拔仙台"')
+  const r = await 跑(s, createJournal(), {
+    rng: () => 0,
+    streamImpl: 假客户端(到拔仙台),
+    选中项: { id: 'A', 文本: '穿过石阵', 类型: '徒步', require: {}, cost: {}, targetNodeId: 'baxiantai' },
+  })
+  assert.equal(r.ok, true)
+  assert.equal(s.place.nodeId, 'wanxianzhen')
+  assert.equal(s.flags.迷路次数, 1)
+  assert.equal(s.flags.恶劣天气暴露次数, 1)
+  assert.ok(r.判定.outcome === 'success')
+  assert.ok(s.pc.体力 <= 25, `迷路与恶劣天气没有形成实质代价：${s.pc.体力}`)
 })
 
 test('判定失败的回合不移动——横切没成怎么会已经到了对面', async () => {

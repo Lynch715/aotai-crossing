@@ -33,6 +33,14 @@ test('主路径从塘口村到下板寺，海拔最高点是拔仙台', () => {
   assert.equal(最高.海拔, 3767)
 })
 
+test('18 个决策节点形成 17 次推进，五个夜晚都正好落在计划营地', () => {
+  assert.equal(MAIN_PATH.length, 18)
+  assert.deepEqual(
+    [2, 5, 8, 11, 14].map((i) => MAIN_PATH[i]),
+    ['yingdi2900', 'shuiwozi', 'yingdi2800', 'dongyuan', 'dayehai'],
+  )
+})
+
 test('getNode 取得到也取不到', () => {
   assert.equal(getNode('maijieling').名称, '麦秸岭')
   assert.equal(getNode('不存在'), undefined)

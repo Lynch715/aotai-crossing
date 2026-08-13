@@ -71,15 +71,50 @@ export const ROUTE = [
     特征: '从2800营地向北，至黄柏塬方向。', 危险: '路程远，野兽出没。' },
 ]
 
-// 主推进路径。玩家沿此序列前进，抵达 xiabansi 即「成功穿越」。
+// 主推进路径只保留 18 个「玩家决策节点」。梁2、塔2/3、西源、石海上下三重、
+// 雷公庙、东跑马梁等仍完整保存在 ROUTE 和事件文案里，但作为一个主节点内部的
+// 子地点演出，不再各吃掉整整一个时段。这样五个计划营地正好每 3 回合出现一次，
+// 最快路线会在第 6 天晚抵达下板寺，而不是第 9 天。
 export const MAIN_PATH = [
-  'tangkou', 'huoshaopo', 'yingdi2900', 'aoshan', 'yaowangdong', 'maijieling',
-  'shuiwozi', 'feijiliang1', 'feijiliang2', 'feijiliang3', 'yingdi2800',
-  'jinzita1', 'jinzita2', 'jinzita3', 'xiyuan',
-  'jiuchongshihai1', 'jiuchongshihai2', 'jiuchongshihai3',
-  'dongyuan', 'wanxianzhen', 'leigongmiao', 'dongpaomaliang', 'baxiantai',
-  'dayehai', 'dawengongmiao', 'tianyuandifang', 'xiabansi',
+  'tangkou', 'huoshaopo', 'yingdi2900',
+  'aoshan', 'maijieling', 'shuiwozi',
+  'feijiliang1', 'feijiliang3', 'yingdi2800',
+  'jinzita1', 'jiuchongshihai2', 'dongyuan',
+  'wanxianzhen', 'baxiantai', 'dayehai',
+  'dawengongmiao', 'tianyuandifang', 'xiabansi',
 ]
+
+// 从当前主节点出发时的确定性地形加成。它与负重、海拔、天气叠加，保证
+// 火烧坡/飞机梁/金字塔/九重石海即使换了模型也保持相同的难度骨架。
+export const TRAVEL_DIFFICULTY = Object.freeze({
+  tangkou: 0,
+  huoshaopo: 6,
+  yingdi2900: 1,
+  aoshan: 4,
+  maijieling: 6,
+  shuiwozi: 2,
+  feijiliang1: 7,
+  feijiliang3: 8,
+  yingdi2800: 2,
+  jinzita1: 8,
+  jiuchongshihai2: 10,
+  dongyuan: 3,
+  wanxianzhen: 6,
+  baxiantai: 7,
+  dayehai: 0,
+  dawengongmiao: 0,
+  tianyuandifang: 0,
+})
+
+export function travelDifficulty(nodeId) {
+  return TRAVEL_DIFFICULTY[nodeId] || 0
+}
+
+export function nextMainNode(nodeId) {
+  const id = nodeId === 'miaopu' ? 'tangkou' : nodeId
+  const i = MAIN_PATH.indexOf(id)
+  return i >= 0 && i < MAIN_PATH.length - 1 ? getNode(MAIN_PATH[i + 1]) : null
+}
 
 // 主路径之外的额外连接：备用起点、南北下撤线。
 // 苗圃是开局二选一的备用起点：简易路直插盆景园，跳过火烧坡的漫长拔高

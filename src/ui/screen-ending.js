@@ -59,6 +59,8 @@ export function endingViewModel(state, journal) {
       天数: state.clock.day,
       最低体力: state.flags?.最低体力 ?? null,
       受伤次数: (state.pc.伤病 || []).length,
+      迷路次数: state.flags?.迷路次数 || 0,
+      恶劣天气暴露次数: state.flags?.恶劣天气暴露次数 || 0,
       剩余主粮: (state.pack || [])
         .filter((p) => p.gearId === 'staple_food' || p.gearId === 'extra_staple')
         .reduce((s, p) => s + p.数量, 0),

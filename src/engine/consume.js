@@ -1,4 +1,4 @@
-import { getNode } from '../data/route.js'
+import { getNode, travelDifficulty } from '../data/route.js'
 import { getSeason } from '../data/seasons.js'
 import { removeItem, hasItem } from './state.js'
 import { getGear } from '../data/gear.js'
@@ -38,15 +38,27 @@ export function effectiveWarmth(state) {
 }
 
 const 每处未愈伤病拖累 = 2
+const 恶劣天气行军线 = 6
 
-export function stepStaminaCost(state) {
+function hasAny(state, ids) {
+  return ids.some((id) => hasItem(state, id))
+}
+
+// 基础行动消耗。社交/整理物资不吃地形加成，徒步与高危行动才吃。
+export function stepStaminaCost(state, { 行军 = true } = {}) {
   const 超出 = Math.max(0, state.carry.当前 - 负重基准线)
-  let cost = Math.floor(基础时段消耗 * Math.pow(1.04, 超出))
-  if (state.place.海拔 > 高海拔线 && !isAcclimatized(state)) cost += 2
-  if (hasItem(state, 'trekking_poles')) cost -= 1
+  let cost = 行军 ? Math.floor(基础时段消耗 * Math.pow(1.04, 超出)) : 2
+  if (行军) {
+    cost += travelDifficulty(state.place.nodeId)
+    if (state.place.海拔 > 高海拔线 && !isAcclimatized(state)) cost += 2
+    if ((state.weather?.等级 ?? 0) >= 恶劣天气行军线) {
+      cost += hasAny(state, ['hardshell', 'rain_pants']) ? 2 : 5
+    }
+    if (hasItem(state, 'trekking_poles')) cost -= 1
+  }
   // 带伤走路更费劲。这是伤病在体力线上的唯一挂钩点——没有它，
   // 轻伤对玩家来说就只是一行字。
-  cost += (state.pc.伤病 || []).filter((w) => !w.已处理).length * 每处未愈伤病拖累
+  cost += (state.pc.伤病 || []).filter((w) => !w.已处理).length * (行军 ? 每处未愈伤病拖累 : 1)
   return Math.max(1, cost)
 }
 
@@ -60,8 +72,8 @@ export function 调整体力(state, delta) {
   return state
 }
 
-export function applyStepCost(state) {
-  return 调整体力(state, -stepStaminaCost(state))
+export function applyStepCost(state, opts) {
+  return 调整体力(state, -stepStaminaCost(state, opts))
 }
 
 export function rest(state) {
@@ -98,21 +110,26 @@ export function eatCold(state) {
 
 export function sleep(state, { 恶劣天气 = false } = {}) {
   const node = getNode(state.place.nodeId)
-  const 装备齐 = hasItem(state, 'tent') && hasItem(state, 'sleeping_bag')
+  const 装备齐 = hasItem(state, 'tent') && hasAny(state, 睡袋清单)
   const 条件好 = 装备齐 && node && node.可扎营 && !恶劣天气
   // 有水源的正规营地（盆景园、水窝子、2800、西源……）恢复力更强——
   // 能打水做饭洗漱，睡得就是踏实。这也让「赶到营地再睡」有了数值意义。
   const 水源营地加成 = 条件好 && node.有水源 ? 5 : 0
-  调整体力(state, (条件好 ? 25 : 12) + 水源营地加成)
+  let 恢复 = (条件好 ? 22 : 4) + 水源营地加成
+  if (条件好 && hasItem(state, 'down_jacket')) 恢复 += 3
+  调整体力(state, 恢复)
 
   if (node && node.海拔 >= 适应海拔线) state.flags.高海拔过夜数 += 1
 
   // 失温判定：夜里比睡袋扛得住的还冷，就算一次失温。连续 失温连败上限 次
-  // 触发「失败遇险」结局（见 ending.js）。这里只记账，不再叠加体力惩罚——
-  // 睡眠回复的 25/12 是被测试钉死的设计值，二次惩罚会让手感失控。
+  // 触发「失败遇险」结局（见 ending.js）。失温当晚再扣 8 点体力，确保
+  // 无睡袋露宿不是可反复利用的低效回血手段。
   const 季节 = getSeason(state.meta.季节)
-  if (季节 && 季节.夜间温度 < effectiveWarmth(state)) {
+  // 坏天气会给睡眠系统再压 5℃；硬壳+中层可抵消这层风寒，但不能替代睡袋。
+  const 风寒 = 恶劣天气 && !hasAny(state, ['hardshell', 'midlayer']) ? 5 : 0
+  if (季节 && 季节.夜间温度 - 风寒 < effectiveWarmth(state)) {
     state.flags.失温连败 += 1
+    调整体力(state, -8)
   } else {
     state.flags.失温连败 = 0
   }
