@@ -535,6 +535,36 @@ test('结算页称号与硬核数字', async () => {
   assert.equal(endingViewModel(s, createJournal()).称号, '捡回一条命')
 })
 
+// ── 节奏控制：一回合最多 2 个时段，代价明码标价 ───────────────────
+
+test('时段代价夹到 1——一回合最多早→晚，绝不跨天', async () => {
+  const s = 局面() // 第4天 早
+  await runTurn({
+    state: s, journal: createJournal(),
+    选中项: { id: 'A', 文本: '冲刺', 类型: '徒步', require: {}, cost: { 时段: 3 } },
+    config: 假配置, streamImpl: 极简回复,
+  })
+  assert.equal(s.clock.day, 4, '不许跨天')
+  assert.equal(s.clock.slot, '晚', '早 + 基础1 + 夹取后的1 = 晚')
+})
+
+test('选项代价明码标价', async () => {
+  const { costLabel } = await import('../src/ui/screen-game.js')
+  assert.equal(costLabel({ 体力: 14, 时段: 1 }), '耗体力约14、多耗一个时段')
+  assert.equal(costLabel({ 体力: 6 }), '耗体力约6')
+  assert.equal(costLabel({}), '')
+  const { optionDisplay } = await import('../src/ui/screen-game.js')
+  const o = optionDisplay({ id: 'A', 文本: 'x', 类型: '徒步', require: {}, cost: { 体力: 12, 时段: 1 } }, 局面())
+  assert.equal(o.代价文案, '耗体力约12、多耗一个时段')
+})
+
+test('system prompt 有节奏铁律', () => {
+  const sys = buildSystemPrompt()
+  assert.ok(sys.includes('节奏铁律'))
+  assert.ok(sys.includes('私自过夜'))
+  assert.ok(sys.includes('一笔带过两个路段') || sys.includes('相邻的下一个地点'))
+})
+
 // ── parser 段落别名 ───────────────────────────────────────────────
 
 test('段落别名：[万象] 与 [选项] 也认', () => {

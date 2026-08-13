@@ -133,7 +133,7 @@ test('地名前缀必须唯一才认，含糊的一律驳回', () => {
 test('代价被夹取：负值归零，超限截断，未知项剔除', () => {
   const { cost, warnings } = clampCost({ 体力: -50, 时段: 99, 金钱: 200, 玄学: 1, 运气: '爆棚' })
   assert.equal(cost.体力, 0, '负代价等于白送体力')
-  assert.equal(cost.时段, 3)
+  assert.equal(cost.时段, 1, '时段上限 1：一回合最多 2 个时段，绝不跨天')
   assert.equal(cost.金钱, 200)
   assert.equal(cost.玄学, undefined)
   assert.equal(cost.运气, undefined)

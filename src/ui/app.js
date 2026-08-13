@@ -767,10 +767,12 @@ function renderGame(router) {
       const APP文本节点 = el('span')
       setText(APP文本节点, o.文本 || '')
       APP选项.appendChild(APP文本节点)
-      // 副文案：概率 or 缺少理由
-      if (o.概率文案 || o.理由) {
+      // 副文案：概率/缺少理由 + 明码标出的代价
+      const 主meta = o.概率文案 || (o.理由 ? '差 ' + o.理由 : '')
+      const 副文案全 = [主meta, o.代价文案].filter(Boolean).join('　·　')
+      if (副文案全) {
         const APP副文案 = el('span', { class: o.档 === '勉强' ? 'option-meta warn-meta' : 'option-meta' })
-        setText(APP副文案, o.概率文案 || ('差 ' + o.理由))
+        setText(APP副文案, 副文案全)
         APP选项.appendChild(APP副文案)
       }
       APP选项区.appendChild(APP选项)

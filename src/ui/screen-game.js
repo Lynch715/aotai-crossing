@@ -86,15 +86,28 @@ export function panelViewModel(state) {
 // 点击之前就把门槛比对算出来，用的是 judgeOption 同一套 gapFor——
 // 所以界面上写的概率和真掷骰时的概率一致，不会骗人。
 // 「玩家能看懂自己为什么失败」是整套判定设计的前提。
+
+// 代价也要明码标价：体力多少、要不要多耗半天、花不花钱——
+// 玩家曾经点了个「冲刺」，睁眼已是第二天，因为没人告诉他这一步吃两个时段。
+export function costLabel(cost) {
+  if (!cost || typeof cost !== 'object') return ''
+  const 段 = []
+  if (typeof cost.体力 === 'number' && cost.体力 > 0) 段.push(`耗体力约${cost.体力}`)
+  if (typeof cost.时段 === 'number' && cost.时段 > 0) 段.push('多耗一个时段')
+  if (typeof cost.金钱 === 'number' && cost.金钱 > 0) 段.push(`花 ¥${cost.金钱}`)
+  return 段.join('、')
+}
+
 export function optionDisplay(option, state) {
   const { gap, reasons } = gapFor(option.require, state)
   const chance = successChance(gap)
+  const 代价文案 = costLabel(option.cost)
 
   if (chance >= 1) {
-    return { ...option, 可点: true, 档: '达标', 概率文案: '', 理由: '' }
+    return { ...option, 可点: true, 档: '达标', 概率文案: '', 理由: '', 代价文案 }
   }
   if (chance <= 0) {
-    return { ...option, 可点: false, 档: '不可达', 概率文案: '', 理由: reasons[0] || '条件不足' }
+    return { ...option, 可点: false, 档: '不可达', 概率文案: '', 理由: reasons[0] || '条件不足', 代价文案 }
   }
   return {
     ...option,
@@ -102,6 +115,7 @@ export function optionDisplay(option, state) {
     档: '勉强',
     概率文案: `勉强 · 约 ${Math.round(chance * 100)}%`,
     理由: reasons[0] || '',
+    代价文案,
   }
 }
 
