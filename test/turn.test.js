@@ -143,6 +143,56 @@ test('麦秸岭晚间前往水窝子：先抵达营地再过夜，不在出发�
   assert.ok(客户端.调用[0][1].content.includes('水窝子是大营地'), '跨夜营地事件应在抵达回合演出')
 })
 
+test('后半程所有计划营地都遵守：抵达—扎营—过夜—次日仍在营地', async () => {
+  const 路段 = [
+    ['maijieling', 3500, 'shuiwozi'],
+    ['feijiliang3', 3500, 'yingdi2800'],
+    ['jiuchongshihai2', 3400, 'dongyuan'],
+    ['baxiantai', 3767, 'dayehai'],
+  ]
+  for (const [出发, 海拔, 营地] of 路段) {
+    const s = 局面()
+    s.clock = { day: 2, slot: '晚' }
+    s.place = { nodeId: 出发, 海拔 }
+    s.pack.push(
+      { gearId: 'tent', 档: '主流', 数量: 1, 单重: 2.4, 余量: 100 },
+      { gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 },
+      { gearId: 'bag_liner', 档: '通用', 数量: 1, 单重: 0.3, 余量: 100 },
+    )
+    const 无去向 = 好回复.replace('"去向建议":"水窝子营地"', '"去向建议":""')
+    const r = await 跑(s, createJournal(), {
+      streamImpl: 假客户端(无去向),
+      选中项: { id: 'D', 文本: `前往${营地}`, 类型: '徒步', require: {}, cost: {}, targetNodeId: 营地 },
+    })
+    assert.equal(r.ok, true, `${出发}→${营地} 回合失败`)
+    assert.deepEqual(s.clock, { day: 3, slot: '早' }, `${营地} 没有正确跨夜`)
+    assert.equal(s.place.nodeId, 营地, `${营地} 被下一路段跳过`)
+    assert.equal(s.flags.失温连败, 0, `${营地} 没按营地条件睡眠`)
+  }
+})
+
+test('第一晚盆景园是独立营地回合，过夜后仍在盆景园', async () => {
+  const s = 局面()
+  s.clock = { day: 1, slot: '晚' }
+  s.place = { nodeId: 'yingdi2900', 海拔: 2900 }
+  s.pack.push(
+    { gearId: 'tent', 档: '主流', 数量: 1, 单重: 2.4, 余量: 100 },
+    { gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 },
+    { gearId: 'bag_liner', 档: '通用', 数量: 1, 单重: 0.3, 余量: 100 },
+  )
+  const 想偷跑鳌山 = 好回复.replace('"去向建议":"水窝子营地"', '"去向建议":"鳌山导航架"')
+  const 客户端 = 假客户端(想偷跑鳌山)
+  const r = await 跑(s, createJournal(), {
+    streamImpl: 客户端,
+    选中项: { id: 'A', 文本: '扎好帐篷，烧水做一顿热食', 类型: '扎营', require: {}, cost: {} },
+  })
+  assert.equal(r.ok, true)
+  assert.deepEqual(s.clock, { day: 2, slot: '早' })
+  assert.equal(s.place.nodeId, 'yingdi2900', '模型提议离营也必须被营地夜规则拦住')
+  assert.ok(客户端.调用[0][1].content.includes('仍在此处'))
+  assert.ok(客户端.调用[0][1].content.includes('不得离营'))
+})
+
 test('合法去向被应用，海拔跟着更新（判定成功的徒步回合才移动）', async () => {
   const s = 局面()
   await 跑(s, createJournal(), {

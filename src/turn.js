@@ -25,6 +25,13 @@ export const FALLBACK_OPTIONS = [
   { id: 'D', 文本: '清点装备和剩余补给', 类型: '徒步', require: {}, cost: {} },
 ]
 
+const CAMP_OPTIONS = [
+  { id: 'A', 文本: '扎好帐篷，烧水做一顿热食', 类型: '扎营', require: {}, cost: {} },
+  { id: 'B', 文本: '检查装备，处理潮气和磨损', 类型: '扎营', require: {}, cost: {} },
+  { id: 'C', 文本: '和同行者聊聊今天的路况', 类型: '扎营', require: {}, cost: {} },
+  { id: 'D', 文本: '尽早钻进睡袋休息', 类型: '扎营', require: {}, cost: {} },
+]
+
 function 就地覆盖(target, source) {
   for (const k of Object.keys(target)) delete target[k]
   Object.assign(target, source)
@@ -124,6 +131,11 @@ export async function runTurn({
   const 档案快照 = JSON.stringify(journal)
 
   try {
+    const 回合起点 = getNode(state.place.nodeId)
+    // 晚上已经站在正规营地时，这一回合属于营地生活与过夜，不允许把“睡觉”和
+    // “明早离营”塞进同一次点击。玩家选哪种营地活动都可以，但地点必须留下。
+    const 强制营地夜 = state.clock.slot === '晚' && !!回合起点?.可扎营
+
     // —— 判定先行 ——
     // 防御性重夹：选项的 require/cost 本该是上回合 validateProposal 夹取过的版本，
     // 但那全靠 UI 自觉存对东西。这里再夹一次，夹取就与调用方的纪律无关了。
@@ -141,7 +153,7 @@ export async function runTurn({
     // —— 硬资源结算：LLM 完全不参与 ——
     // 选项申报的 cost 是「这一步总共多累」，与基础步进消耗取大，不叠加——
     // 叠加会把每个 cost 都变相加价一个基础步进，跟界面上标的价对不上。
-    const 行军 = 选中项.类型 !== '社交'
+    const 行军 = !强制营地夜 && 选中项.类型 !== '社交'
     const 基础步进 = stepStaminaCost(state, { 行军 })
     applyStepCost(state, { 行军 })
     if (typeof 净代价.体力 === 'number' && 净代价.体力 > 基础步进) {
@@ -164,9 +176,9 @@ export async function runTurn({
     // 时段推进：先走时钟，但把跨夜结算延后到“实际移动完成”之后。旧顺序会在
     // 麦秸岭先睡一晚，再把位置挪到水窝子——玩家看起来就像跳过了营地。
     const 推进备注 = []
-    const 路险 = applyTravelRisks(state, 选中项, 判定, 回合rng)
+    const 路险 = 强制营地夜 ? { 迷路: false, notes: [] } : applyTravelRisks(state, 选中项, 判定, 回合rng)
     推进备注.push(...路险.notes)
-    const 预计去向 = 行军 && 判定.outcome === 'success' && !路险.迷路
+    const 预计去向 = !强制营地夜 && 行军 && 判定.outcome === 'success' && !路险.迷路
       ? (选中项.targetNodeId ? getNode(选中项.targetNodeId) : nextMainNode(state.place.nodeId))
       : null
     const 推进次数 = 1 + (typeof 净代价.时段 === 'number' ? Math.max(0, Math.floor(净代价.时段)) : 0)
@@ -178,7 +190,9 @@ export async function runTurn({
     }
     if (待结算夜数 > 0) {
       const 落点 = 预计去向 || getNode(state.place.nodeId)
-      推进备注.push(`跨夜顺序：必须先抵达${落点?.名称 || '落脚点'}，演出扎营、过夜，再进入第${state.clock.day}天${state.clock.slot}；不得直接跳往下一路段`)
+      推进备注.push(强制营地夜
+        ? `今晚停留在${落点?.名称 || '营地'}：演出营地活动、扎营与过夜；第${state.clock.day}天${state.clock.slot}仍在此处，不得离营或跳往下一路段`
+        : `跨夜顺序：必须先抵达${落点?.名称 || '落脚点'}，演出扎营、过夜，再进入第${state.clock.day}天${state.clock.slot}；不得直接跳往下一路段`)
     }
     if (金钱前 !== state.money) 推进备注.push(`花掉 ¥${金钱前 - state.money}`)
     if (历练 > 0) 推进备注.push(`险中求成，户外经验 +${历练}`)
@@ -339,7 +353,7 @@ export async function runTurn({
     // 移动的两道闸：社交回合不移动（蹲下喂口水不该把人挪到下一个路段），
     // 判定失败也不移动（横切没成怎么会已经到了对面）。模型在这两种回合
     // 里照样爱写去向建议，校验只查相邻性管不到这层语义，得在这里拦。
-    const 允许移动 = 选中项.类型 !== '社交' && 判定.outcome === 'success' && !路险.迷路
+    const 允许移动 = !强制营地夜 && 选中项.类型 !== '社交' && 判定.outcome === 'success' && !路险.迷路
     const 实际去向 = v.去向 || 选中项.targetNodeId || null
     if (实际去向 && 允许移动) {
       state.place.nodeId = 实际去向
@@ -373,6 +387,11 @@ export async function runTurn({
       }
     }
     结果.选项 = ensureProgressOption(结果.选项, state)
+    // 抵达营地且时间是晚：下个点击明确进入营地回合。不能给一个“继续赶路”
+    // 的按钮，再由后台偷偷把它解释成睡觉。
+    if (state.clock.slot === '晚' && getNode(state.place.nodeId)?.可扎营) {
+      结果.选项 = CAMP_OPTIONS.map((o) => ({ ...o }))
+    }
 
     compressJournal(journal)
 
