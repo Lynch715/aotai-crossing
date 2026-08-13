@@ -24,7 +24,7 @@
 ## 开发
 
 ```bash
-npm test          # 523 个测试，零依赖
+npm test          # 526 个测试，零依赖
 npm run build     # 产出 dist/ 单文件 + assets
 AOTAI_KEY=xxx npm run smoke   # 对真实 API 跑一个完整回合
 ```

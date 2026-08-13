@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { runTurn, FALLBACK_OPTIONS, MAX_REPAIR, ensureProgressOption } from '../src/turn.js'
+import { runTurn, FALLBACK_OPTIONS, MAX_REPAIR, ensureProgressOption, ensureOvernightLanding } from '../src/turn.js'
 import { createInitialState } from '../src/engine/state.js'
 import { createJournal } from '../src/engine/journal.js'
 import { STATE_MARKER } from '../src/llm/parser.js'
@@ -191,6 +191,42 @@ test('第一晚盆景园是独立营地回合，过夜后仍在盆景园', async
   assert.equal(s.place.nodeId, 'yingdi2900', '模型提议离营也必须被营地夜规则拦住')
   assert.ok(客户端.调用[0][1].content.includes('仍在此处'))
   assert.ok(客户端.调用[0][1].content.includes('不得离营'))
+})
+
+test('营地聊天、吃饭、整理、早睡都会把剧情收束到次日清晨', async () => {
+  const 营地选项 = [
+    ['A', '扎好帐篷，烧水做一顿热食'],
+    ['B', '检查装备，处理潮气和磨损'],
+    ['C', '和同行者聊聊今天的路况'],
+    ['D', '尽早钻进睡袋休息'],
+  ]
+  for (const [id, 文本] of 营地选项) {
+    const s = 局面()
+    s.clock = { day: 1, slot: '晚' }
+    s.place = { nodeId: 'yingdi2900', 海拔: 2900 }
+    s.pack.push(
+      { gearId: 'tent', 档: '主流', 数量: 1, 单重: 2.4, 余量: 100 },
+      { gearId: 'sleeping_bag', 档: '主流', 数量: 1, 单重: 1.2, 余量: 100 },
+    )
+    const 客户端 = 假客户端(好回复)
+    const r = await 跑(s, createJournal(), {
+      streamImpl: 客户端,
+      选中项: { id, 文本, 类型: '扎营', require: {}, cost: {} },
+    })
+    assert.deepEqual(s.clock, { day: 2, slot: '早' }, `${文本}没有正确跨夜`)
+    assert.equal(s.place.nodeId, 'yingdi2900')
+    assert.match(r.剧情, /次日清晨/)
+    const user = 客户端.调用[0][1].content
+    assert.ok(user.includes('从第1天晚开始'), `${文本}缺少叙事起点`)
+    assert.ok(user.includes('最后一段必须写到第2天早'), `${文本}缺少清晨终点`)
+    assert.ok(user.includes('第2天 早｜2900营地\/盆景园'), `${文本}的状态快照没有落在营地清晨`)
+  }
+})
+
+test('模型已经写到清晨时不重复追加清晨收束', () => {
+  const 剧情 = '大家聊完便钻进帐篷。\n\n次日清晨，你拉开帐篷，队伍仍在盆景园。'
+  assert.equal(ensureOvernightLanding(剧情, { 跨夜数: 1, 营地名: '2900营地/盆景园' }), 剧情)
+  assert.equal(ensureOvernightLanding('今晚围炉聊天。', { 跨夜数: 0, 营地名: '2900营地/盆景园' }), '今晚围炉聊天。')
 })
 
 test('合法去向被应用，海拔跟着更新（判定成功的徒步回合才移动）', async () => {

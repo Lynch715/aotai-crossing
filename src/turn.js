@@ -41,6 +41,19 @@ const 时段表 = ['早', '中', '晚']
 const 判定失败惩罚 = 5
 const 处理伤病耗材 = 25
 
+const 清晨落点词 = /(?:次日|翌日|第二天|天亮|清晨|早晨|一早|晨光|醒来|起床)/
+
+// 模型偶尔会无视“跨夜后必须写到清晨”的硬指令，只演完聊天/吃饭便停在
+// 当晚。此时顶栏已经是次日早，画面就会和正文打架。时钟是引擎事实，所以
+// 最后一层由引擎补一小段确定性的清晨落点；模型已经写到清晨时不重复。
+export function ensureOvernightLanding(剧情, { 跨夜数 = 0, 营地名 = '' } = {}) {
+  const 文本 = String(剧情 || '').trim()
+  if (跨夜数 <= 0 || !文本) return 文本
+  if (清晨落点词.test(文本.slice(-180))) return 文本
+  const 地点 = 营地名 || '营地'
+  return `${文本}\n\n次日清晨，你们仍在${地点}。天已经亮了，新一天的路还没有开始。`
+}
+
 function 稳妥推进选项(state, id = 'D') {
   const next = nextMainNode(state.place.nodeId)
   if (!next) return { id, 文本: '沿既定路线稳妥前进', 类型: '徒步', require: {}, cost: {} }
@@ -185,6 +198,7 @@ export async function runTurn({
 
   try {
     const 回合起点 = getNode(state.place.nodeId)
+    const 回合起始时钟 = { ...state.clock }
     // 晚上已经站在正规营地时，这一回合属于营地生活与过夜，不允许把“睡觉”和
     // “明早离营”塞进同一次点击。玩家选哪种营地活动都可以，但地点必须留下。
     const 强制营地夜 = state.clock.slot === '晚' && !!回合起点?.可扎营
@@ -265,6 +279,9 @@ export async function runTurn({
       判定: 判定.outcome === 'success' ? '成功' : '失败',
       原因: 判定.reasons[0] || '',
       已结算: [`体力 ${体力前}→${state.pc.体力}｜推进到第${state.clock.day}天${state.clock.slot}`, ...推进备注].join('｜'),
+      剧情时序: 待结算夜数 > 0
+        ? `从第${回合起始时钟.day}天${回合起始时钟.slot}开始，演出所选活动、入睡与过夜；最后一段必须写到第${state.clock.day}天${state.clock.slot}，人物仍在${(预计去向 || 回合起点)?.名称 || '当前营地'}，不得停在前一晚`
+        : `从第${回合起始时钟.day}天${回合起始时钟.slot}推进到第${state.clock.day}天${state.clock.slot}，不得越过这个终点`,
     }
 
     // —— 季节固定事件：到点即触发，一局一次 ——
@@ -280,7 +297,12 @@ export async function runTurn({
 
     // —— 请求 ——
     const system = buildSystemPrompt()
-    const user = buildUserMessage({ state, journal, 既成事实, 最近回合, 事件 })
+    // 模型看到的“当前快照”应是这一步的确定落点。真正 state 仍等 STATE
+    // 校验通过后才写入，既保持原子性，也避免出现“次日早却还在出发地”的矛盾。
+    const 叙事局面 = 预计去向
+      ? { ...state, place: { nodeId: 预计去向.id, 海拔: 预计去向.海拔 } }
+      : state
+    const user = buildUserMessage({ state: 叙事局面, journal, 既成事实, 最近回合, 事件 })
     const { text, finish, reasoning } = await streamImpl({
       config, onDelta, signal,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
@@ -312,6 +334,11 @@ export async function runTurn({
       parsed.剧情 = 兜底正文(state, 选中项, 判定)
       parsed.errors.push('模型两次都没写正文，本回合用了引擎保底段落')
     }
+
+    parsed.剧情 = ensureOvernightLanding(parsed.剧情, {
+      跨夜数: 待结算夜数,
+      营地名: (预计去向 || 回合起点)?.名称 || '',
+    })
 
     // —— 尾段崩了就补救：只重发尾段，不重写正文 ——
     let 补救次数 = 0

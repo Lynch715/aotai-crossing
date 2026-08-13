@@ -49,6 +49,13 @@ test('system prompt 逐条落实文档的文风禁令', () => {
   }
 })
 
+test('跨夜是节奏规则的明确例外，正文必须落到次日清晨', () => {
+  const p = buildSystemPrompt()
+  assert.ok(p.includes('明确写了“跨夜”时例外'))
+  assert.ok(p.includes('最后一段明确落在次日清晨'))
+  assert.ok(p.includes('不能只写到当天晚上'))
+})
+
 test('system prompt 含一个完整输出范例', () => {
   const p = buildSystemPrompt()
   assert.ok(p.includes('[剧情标题]'))
