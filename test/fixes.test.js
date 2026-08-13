@@ -258,6 +258,26 @@ test('伤病与入队规则写进了 system prompt；主角伤病出现在 user 
   assert.ok(m.includes('左膝扭伤'), 'user message 缺主角伤病')
 })
 
+// ── 无害口误静默忽略，不再每回合喊「提议被拦下」 ──────────────────
+
+test('模型把主角填进说话人/好感是常见口误，静默忽略、零警告', () => {
+  const s = 局面()
+  const v = validateProposal(s, {
+    说话人: '周野',
+    好感: [{ npc: '周野', delta: 3 }, { npc: '林晓雅', delta: 2 }],
+  })
+  assert.equal(v.说话人, null)
+  assert.equal(v.好感变更.length, 1, '真队友的好感仍应生效')
+  assert.equal(v.warnings.length, 0, `不该有警告：${v.warnings}`)
+})
+
+test('去向建议填当前所在地 = 原地不动，静默忽略、零警告', () => {
+  const s = 局面()
+  const v = validateProposal(s, { 去向建议: '水窝子营地' })
+  assert.equal(v.去向, null)
+  assert.equal(v.warnings.length, 0, `不该有警告：${v.warnings}`)
+})
+
 // ── parser 段落别名 ───────────────────────────────────────────────
 
 test('段落别名：[万象] 与 [选项] 也认', () => {

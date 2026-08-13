@@ -151,7 +151,7 @@ test('assertHtmlPlaceholders 在 __STYLES__ 占位符缺失时抛出错误', () 
 test('buildHtml 把 styles.css 注进去，不再是空字符串', () => {
   const html = buildHtml()
   assert.ok(!html.includes('__STYLES__'), '占位符没被替换')
-  assert.ok(html.includes('--bg-deep'), '主题变量没进产物')
+  assert.ok(html.includes('--paper'), '主题变量没进产物')
   assert.ok(/<style>[\s\S]{200,}<\/style>/.test(html), '样式内容过短，可能没读到文件')
 })
 

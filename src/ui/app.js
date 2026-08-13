@@ -5,7 +5,7 @@
 
 import { el, setText, clear } from './dom.js'
 import { createRouter } from './router.js'
-import { portraitInto } from './portrait.js'
+import { portraitInto, sceneInto } from './portrait.js'
 import { loadConfig, saveConfig, configViewModel, validateConfig } from './config.js'
 import { createViewModel, randomDraft, deriveExperience } from './screen-create.js'
 import { drawCompanions, drawViewModel } from './screen-draw.js'
@@ -600,8 +600,13 @@ function renderGame(router) {
   APP左栏.appendChild(APP面板)
   APP布局.appendChild(APP左栏)
 
-  // ── 右栏：舞台 + 剧情 + 选项
+  // ── 右栏：场景照片 + 舞台 + 剧情 + 选项
   const APP右栏 = el('div', { class: 'game-main' })
+
+  // 场景带：当前路段的照片（assets/scenes/ 有图才显示）
+  const APP场景带 = el('div', { class: 'scene-band' })
+  sceneInto(APP场景带, state.place.nodeId)
+  APP右栏.appendChild(APP场景带)
 
   // 舞台（队友立绘，说话人高亮）
   const APP舞台 = el('div', { class: 'stage' })
@@ -793,12 +798,19 @@ function renderGame(router) {
     }
   }
 
+  let APP上次场景 = state.place.nodeId
+
   function APP刷新顶栏() {
     const v = gameViewModel({ state, 回合: null, 说话人: null })
     setText(APP节点名, v.顶栏.地点)
     setText(APP时间, v.顶栏.时间)
     setText(APP海拔, v.顶栏.海拔 + 'm')
     setText(APP天气, v.顶栏.天气)
+    // 换了路段才重新探测场景图，原地不动不发无谓的图片请求
+    if (state.place.nodeId !== APP上次场景) {
+      APP上次场景 = state.place.nodeId
+      sceneInto(APP场景带, state.place.nodeId)
+    }
   }
 
   // 原生操作共用的收尾：存档、刷面板、刷顶栏，并接住可能触发的结局。

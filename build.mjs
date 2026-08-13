@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -115,9 +115,22 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // 立绘按相对路径 assets/portraits/xxx.png 加载，必须跟产物放在同一层，
   // 否则从 dist/ 里解析会指向 dist/assets/——图永远加载不到，且只会静默
   // 退回占位，没有任何报错。
+  // 手写递归拷贝而不用 cpSync：cpSync 会顺带同步目录权限位，在某些
+  // 挂载盘（云同步、沙盒 FUSE）上 chmod 被拒就整个炸掉；顺带把
+  // .DS_Store 一类点开头的垃圾文件挡在产物外。
+  const 拷贝目录 = (src, dst) => {
+    mkdirSync(dst, { recursive: true })
+    for (const entry of readdirSync(src, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue
+      const s = join(src, entry.name)
+      const d = join(dst, entry.name)
+      if (entry.isDirectory()) 拷贝目录(s, d)
+      else copyFileSync(s, d)
+    }
+  }
   const 素材源 = join(ROOT, 'assets')
   if (existsSync(素材源)) {
-    cpSync(素材源, join(ROOT, 'dist/assets'), { recursive: true })
+    拷贝目录(素材源, join(ROOT, 'dist/assets'))
     const n = readdirSync(join(ROOT, 'dist/assets/portraits')).filter((f) => f.endsWith('.png')).length
     console.log(`已复制 assets/（立绘 ${n} 张）`)
   } else {

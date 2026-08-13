@@ -148,8 +148,15 @@ export function validateProposal(state, proposal) {
   const 在队或将入队 = (npcId) =>
     队伍.some((p) => p.npcId === npcId && p.在队) || 新入队.has(npcId)
 
+  // 主角名字出现在人物字段里是模型最高频的「口误」（几乎每回合都犯）。
+  // 它无害——主角不是 NPC，没有好感也不上立绘舞台——静默忽略即可。
+  // 记警告的话，玩家每回合都看到「本回合有 1 处提议被拦下」，狼来了喊多了，
+  // 真出问题的警告反而没人看。
+  const 是主角 = (名) => !!state?.pc?.名字 && String(名 || '').trim() === state.pc.名字
+
   for (const item of Array.isArray(proposal.好感) ? proposal.好感 : []) {
     if (!item || typeof item !== 'object') continue
+    if (是主角(item.npc)) continue
     const npcId = resolveNpc(item.npc)
     if (!npcId) {
       out.warnings.push(`好感提议引用了未知人物「${item.npc}」，已驳回`)
@@ -168,7 +175,7 @@ export function validateProposal(state, proposal) {
 
   // 说话人。立绘舞台靠它决定谁亮起——没有这个字段，舞台上永远没人说话，
   // 「说话人高亮」这条设计就是死的。只认在队的人，认不出就留 null。
-  if (typeof proposal.说话人 === 'string' && proposal.说话人.trim()) {
+  if (typeof proposal.说话人 === 'string' && proposal.说话人.trim() && !是主角(proposal.说话人)) {
     const npcId = resolveNpc(proposal.说话人)
     if (!npcId) {
       out.warnings.push(`说话人认不出这个人：${proposal.说话人}`)
@@ -275,7 +282,9 @@ export function validateProposal(state, proposal) {
 
   if (proposal.去向建议) {
     const id = resolveNode(proposal.去向建议)
-    if (id && 当前节点 && isAdjacent(当前节点, id)) {
+    if (id && id === 当前节点) {
+      // 填了当前所在地 = 原地不动。这是模型的常见写法而非越权，静默忽略。
+    } else if (id && 当前节点 && isAdjacent(当前节点, id)) {
       out.去向 = id
     } else {
       out.warnings.push(`去向建议「${proposal.去向建议}」不是当前位置的合法相邻节点，已驳回`)

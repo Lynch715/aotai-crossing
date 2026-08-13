@@ -61,6 +61,29 @@ export function portraitPath(npcId, 状态) {
   return `assets/portraits/${npcId}${状态 ? '_' + 状态 : ''}.png`
 }
 
+// 场景照片：assets/scenes/{路段id}.jpg。纯可选素材——加载成功才把
+// 场景带亮出来（.has-img），没有图就整条隐藏，界面不留空洞。
+// 与立绘同理用 <img> 探测而不是 fetch：file:// 下 fetch 会被 CORS 挡死。
+export function scenePath(nodeId) {
+  return `assets/scenes/${nodeId}.jpg`
+}
+
+export function sceneInto(容器, nodeId) {
+  容器.classList.remove('has-img')
+  容器.textContent = ''
+  if (!nodeId) return 容器
+  const img = new Image()
+  img.alt = ''
+  img.className = 'scene-img'
+  img.onload = () => {
+    容器.textContent = ''
+    容器.appendChild(img)
+    容器.classList.add('has-img')
+  }
+  img.src = scenePath(nodeId)
+  return 容器
+}
+
 // 真图的候选路径，按优先级排：先试状态专属图，再退回基础图。
 // 拆成纯函数是为了能在没有 DOM 的 node --test 里验顺序。
 export function portraitCandidates(npcId, 状态) {
