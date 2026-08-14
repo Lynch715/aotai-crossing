@@ -36,6 +36,7 @@ export const MODULE_ORDER = [
   'src/ui/screen-shop.js',
   'src/ui/screen-game.js',
   'src/ui/screen-ending.js',
+  'src/ui/story-log.js',
   'src/ui/app.js',
 ]
 

@@ -10,8 +10,9 @@ import { loadConfig, saveConfig, configViewModel, validateConfig } from './confi
 import { createViewModel, randomDraft, deriveExperience } from './screen-create.js'
 import { drawCompanions, drawViewModel } from './screen-draw.js'
 import { shopViewModel, toggleItem, setTier, recommendedCart, START_MONEY } from './screen-shop.js'
-import { gameViewModel, panelViewModel, actionsViewModel } from './screen-game.js'
+import { gameViewModel, panelViewModel, actionsViewModel, routeMapViewModel } from './screen-game.js'
 import { endingViewModel } from './screen-ending.js'
+import { storyPoint, makeTurnStoryEntry, makeActionStoryEntry, formatStoryLog } from './story-log.js'
 import { createTypewriter, splitParagraphs } from './prose.js'
 import { rollSeason, getSeason } from '../data/seasons.js'
 import { getNpc } from '../data/npcs.js'
@@ -41,6 +42,91 @@ const APP会话 = {
   // 最近若干回合的原文（字符串数组），供 LLM 续写上下文。
   // 随自动存档持久化——它是剧情连贯性的命脉，刷新后必须还原。
   最近回合: [],
+  // 从出发开始的逐回合档案，供玩家回看，也可连同当前状态复制用于排错。
+  完整故事: [],
+  故事从出发完整: true,
+}
+
+async function APP复制文本(文本, 按钮) {
+  const 原文 = 按钮.textContent
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(文本)
+    } else {
+      const 输入 = el('textarea', { value: 文本 })
+      输入.style.position = 'fixed'
+      输入.style.opacity = '0'
+      document.body.appendChild(输入)
+      输入.select()
+      document.execCommand('copy')
+      输入.remove()
+    }
+    setText(按钮, '已复制')
+  } catch {
+    setText(按钮, '复制失败，请重试')
+  }
+  setTimeout(() => setText(按钮, 原文), 1600)
+}
+
+function APP打开完整旅程(state, journal) {
+  const 已有 = document.querySelector('.story-dialog')
+  if (已有) 已有.remove()
+
+  const 对话框 = el('dialog', { class: 'story-dialog' })
+  const 页眉 = el('div', { class: 'story-dialog-head' })
+  const 标题组 = el('div')
+  标题组.appendChild(el('h2', { text: '从出发开始的完整旅程' }))
+  标题组.appendChild(el('div', { class: 'muted', text: `已记录 ${APP会话.完整故事.length} 条行动与剧情` }))
+  页眉.appendChild(标题组)
+  const 关闭 = el('button', { class: 'story-close', 'aria-label': '关闭', onclick: () => 对话框.close() }, ['×'])
+  页眉.appendChild(关闭)
+  对话框.appendChild(页眉)
+
+  if (!APP会话.故事从出发完整) {
+    对话框.appendChild(el('div', {
+      class: 'notice warn',
+      text: '这局从旧版本存档恢复：升级前只保存最近几回合，因此较早剧情无法补回；升级后的记录会继续完整保存。',
+    }))
+  }
+
+  const 列表 = el('div', { class: 'story-list' })
+  if (!APP会话.完整故事.length) {
+    列表.appendChild(el('div', { class: 'story-empty', text: '旅程尚未开始。完成第一个选择后，这里会留下第一条记录。' }))
+  }
+  for (const e of APP会话.完整故事) {
+    const 卡 = el('article', { class: 'story-entry' })
+    卡.appendChild(el('div', { class: 'story-entry-kicker', text: `第 ${e.序号 || '?'} 条 · ${e.类型 || '旅程记录'}` }))
+    卡.appendChild(el('h3', { text: e.标题 || e.选择?.文本 || '途中记录' }))
+    if (e.开始 || e.结束) {
+      const 起 = e.开始 ? `第${e.开始.day}天${e.开始.slot} ${e.开始.地点}` : '旧记录'
+      const 终 = e.结束 ? `第${e.结束.day}天${e.结束.slot} ${e.结束.地点}` : '—'
+      卡.appendChild(el('div', { class: 'story-route', text: `${起} → ${终}` }))
+    }
+    if (e.选择?.文本) 卡.appendChild(el('div', { class: 'story-choice', text: `你的选择：${e.选择.文本}${e.判定 ? `（${e.判定}）` : ''}` }))
+    for (const 段 of splitParagraphs(e.剧情 || '')) 卡.appendChild(el('p', { text: 段 }))
+    for (const 条 of e.生存提示 || []) 卡.appendChild(el('div', { class: 'story-survival', text: `生存结算｜${条}` }))
+    for (const 条 of e.万象 || []) 卡.appendChild(el('div', { class: 'story-world', text: `万象｜${条}` }))
+    列表.appendChild(卡)
+  }
+  对话框.appendChild(列表)
+
+  const 操作 = el('div', { class: 'story-actions' })
+  const 复制故事 = el('button', {
+    onclick: () => APP复制文本(formatStoryLog(APP会话.完整故事, state), 复制故事),
+  }, ['复制完整故事'])
+  const 复制排错 = el('button', {
+    class: 'primary',
+    onclick: () => APP复制文本(formatStoryLog(APP会话.完整故事, state, { debug: true, journal }), 复制排错),
+  }, ['复制排错记录'])
+  操作.appendChild(复制故事)
+  操作.appendChild(复制排错)
+  对话框.appendChild(操作)
+  对话框.addEventListener('close', () => 对话框.remove())
+  对话框.addEventListener('click', (event) => {
+    if (event.target === 对话框) 对话框.close()
+  })
+  document.body.appendChild(对话框)
+  对话框.showModal()
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -559,12 +645,23 @@ function APP出发(shopVm, router) {
   }
 
   const journal = createJournal()
-  writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
+  APP会话.最近回合 = []
+  const 出发点 = storyPoint(state)
+  const 队伍名 = APP会话.队友.map((p) => getNpc(p.npcId)?.名称 || p.npcId).join('、') || '独自一人'
+  APP会话.完整故事 = [makeActionStoryEntry({
+    序号: 1,
+    开始: 出发点,
+    结束: 出发点,
+    动作: '整装出发',
+    类型: '出发记录',
+    反馈: `${pc.名字}在${出发点.地点}背起${state.carry.当前}kg的行囊，与${队伍名}踏上${APP会话.季节}的鳌太线。`,
+  })]
+  APP会话.故事从出发完整 = true
+  writeSave(localStorage, 'auto', state, journal, APP会话.最近回合, APP会话.完整故事)
 
   // 把 state/journal 挂到会话上，让 renderGame 能读到
   APP会话.state = state
   APP会话.journal = journal
-  APP会话.最近回合 = []
 
   router.go('game')
 }
@@ -596,6 +693,14 @@ function renderGame(router) {
   APP顶栏.appendChild(APP天气)
   APP顶栏.appendChild(APP行程)
 
+  const APP故事钮 = el('button', {
+    class: 'link-btn story-open-btn',
+    onclick: () => APP打开完整旅程(state, journal),
+  })
+  const APP刷新故事按钮 = () => setText(APP故事钮, `完整旅程（${APP会话.完整故事.length}）`)
+  APP刷新故事按钮()
+  APP顶栏.appendChild(APP故事钮)
+
   // 半途放弃重开的出口。两段式确认——整局进度一键清空，误触代价太大。
   const APP重开钮 = el('button', { class: 'link-btn' }, ['重新开始'])
   let APP重开待确认 = false
@@ -609,12 +714,56 @@ function renderGame(router) {
     APP会话.state = null
     APP会话.journal = null
     APP会话.最近回合 = []
+    APP会话.完整故事 = []
+    APP会话.故事从出发完整 = true
     APP会话.种子 = Math.floor(Math.random() * 2 ** 31)
     APP会话.draft = randomDraft(makeRng(APP会话.种子))
     router.go('create')
   })
   APP顶栏.appendChild(APP重开钮)
   root.appendChild(APP顶栏)
+
+  // ── 动态全线路线图：常驻、横向滚动，位置与今晚营地随每次行动刷新。
+  const APP路线区 = el('section', { class: 'route-map panel' })
+  root.appendChild(APP路线区)
+
+  function APP渲染路线图() {
+    const 路线 = routeMapViewModel(state)
+    clear(APP路线区)
+    const 题头 = el('div', { class: 'route-map-head' })
+    题头.appendChild(el('div', { class: 'route-map-title', text: '全线位置' }))
+    题头.appendChild(el('div', {
+      class: `route-camp-summary ${路线.营地状态 === '赶不上' ? 'danger' : 路线.营地状态 === '紧迫' ? 'warn' : ''}`,
+      text: `今晚：${路线.今晚营地}${路线.营地状态 ? ` · ${路线.营地状态}` : ''}｜${路线.营地说明}`,
+    }))
+    APP路线区.appendChild(题头)
+
+    const 滚动 = el('div', { class: 'route-map-scroll', tabindex: '0', 'aria-label': '鳌太线完整路线图' })
+    const 轨道 = el('div', { class: 'route-track' })
+    let 当前元素 = null
+    for (const n of 路线.节点) {
+      const 类名 = ['route-node', n.状态 === '已走过' ? 'passed' : n.状态 === '当前位置' ? 'current' : 'future']
+      if (n.是计划营地) 类名.push('camp')
+      if (n.是今晚营地) 类名.push('tonight')
+      const 站 = el('div', { class: 类名.join(' '), title: `${n.名称} · ${n.海拔}m` })
+      const 点 = el('div', { class: 'route-dot', text: n.状态 === '已走过' ? '✓' : n.状态 === '当前位置' ? '你' : n.是计划营地 ? '营' : '' })
+      站.appendChild(点)
+      站.appendChild(el('div', { class: 'route-label', text: n.短名 }))
+      站.appendChild(el('div', { class: 'route-elevation', text: `${n.海拔}m` }))
+      if (n.是今晚营地) 站.appendChild(el('div', { class: 'route-tonight-label', text: '今晚营地' }))
+      for (const 撤 of n.下撤) 站.appendChild(el('div', { class: 'route-retreat', text: `↘ 下撤 ${撤.名称}` }))
+      if (n.状态 === '当前位置') 当前元素 = 站
+      轨道.appendChild(站)
+    }
+    滚动.appendChild(轨道)
+    APP路线区.appendChild(滚动)
+    APP路线区.appendChild(el('div', { class: 'route-legend', text: '实心：已走过　红圈：你的位置　方框“营”：计划营地　红旗：今晚营地' }))
+    requestAnimationFrame(() => {
+      if (!当前元素) return
+      滚动.scrollLeft = Math.max(0, 当前元素.offsetLeft - 滚动.clientWidth / 2 + 当前元素.clientWidth / 2)
+    })
+  }
+  APP渲染路线图()
 
   // ── 双栏
   const APP布局 = el('div', { class: 'game-layout' })
@@ -843,15 +992,24 @@ function renderGame(router) {
 
   // 原生操作共用的收尾：存档、刷面板、刷顶栏，并接住可能触发的结局。
   // 返回 true 表示已经跳去结局页，调用方不要再动界面。
-  function APP结算原生操作(反馈) {
-    writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
+  function APP结算原生操作(反馈, { 动作 = '途中操作', 开始 = storyPoint(state) } = {}) {
+    APP会话.完整故事.push(makeActionStoryEntry({
+      序号: APP会话.完整故事.length + 1,
+      开始,
+      结束: storyPoint(state),
+      动作,
+      反馈,
+    }))
+    APP刷新故事按钮()
+    writeSave(localStorage, 'auto', state, journal, APP会话.最近回合, APP会话.完整故事)
     APP渲染面板(state)
     APP刷新顶栏()
+    APP渲染路线图()
     setText(APP行动反馈, 反馈 || '')
     const ending = checkEnding(state)
     if (ending) {
       applyEnding(state, ending)
-      writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
+      writeSave(localStorage, 'auto', state, journal, APP会话.最近回合, APP会话.完整故事)
       router.go('ending')
       return true
     }
@@ -867,18 +1025,21 @@ function renderGame(router) {
     clear(APP行动区)
     const 排 = [
       ['热食', () => {
+        const 开始 = storyPoint(state)
         const 前 = state.pc.体力
-        if (eatHot(state)) APP结算原生操作(`吃了顿热食，体力 ${前}→${state.pc.体力}`)
+        if (eatHot(state)) APP结算原生操作(`吃了顿热食，体力 ${前}→${state.pc.体力}`, { 动作: '烧水做热食', 开始 })
       }],
       ['冷食', () => {
+        const 开始 = storyPoint(state)
         const 前 = state.pc.体力
-        if (eatCold(state)) APP结算原生操作(`啃了点路餐，体力 ${前}→${state.pc.体力}`)
+        if (eatCold(state)) APP结算原生操作(`啃了点路餐，体力 ${前}→${state.pc.体力}`, { 动作: '吃路餐', 开始 })
       }],
       ['休整', () => {
+        const 开始 = storyPoint(state)
         const 前 = state.pc.体力
         rest(state)
         const r = advanceTimeSlot(state)
-        APP结算原生操作(`原地休整了一个时段，体力 ${前}→${state.pc.体力}${r.跨天 ? '，已过夜' : ''}`)
+        APP结算原生操作(`原地休整了一个时段，体力 ${前}→${state.pc.体力}${r.跨天 ? '，已过夜' : ''}`, { 动作: '原地休整', 开始 })
       }],
     ]
     for (const [键, 动作] of 排) {
@@ -903,10 +1064,11 @@ function renderGame(router) {
             return
           }
           APP下撤待确认 = null
+          const 开始 = storyPoint(state)
           state.place.nodeId = 撤.nodeId
           state.place.海拔 = getNode(撤.nodeId).海拔
           recordNode(journal, 撤.nodeId)
-          APP结算原生操作('')
+          APP结算原生操作(`从主线下撤至${撤.名称}，本次穿越结束。`, { 动作: `下撤${撤.名称}`, 开始 })
         },
       }, [待确认 ? `确认从${撤.名称}出山？` : 撤.文案]))
     }
@@ -918,11 +1080,12 @@ function renderGame(router) {
         title: avm.补给.原因 || undefined,
         onclick: () => {
           if (APP进行中 || !avm.补给.可用) return
+          const 开始 = storyPoint(state)
           state.money -= avm.补给.价格
           addItem(state, 'staple_food', '经济', 4)
           const 炉 = state.pack.find((p) => p.gearId === 'stove')
           if (炉) 炉.余量 = 100
-          APP结算原生操作(`在接待站补了 4 份主粮${炉 ? '、换满了气罐' : ''}，花 ¥${avm.补给.价格}`)
+          APP结算原生操作(`在接待站补了 4 份主粮${炉 ? '、换满了气罐' : ''}，花 ¥${avm.补给.价格}`, { 动作: '接待站补给', 开始 })
         },
       }, [avm.补给.文案]))
     }
@@ -941,15 +1104,17 @@ function renderGame(router) {
           setText(APP行动反馈, '再点一次确认——救援队来了，这一局就结束了。')
           return
         }
+        const 开始 = storyPoint(state)
         state.flags.已求救 = true
         APP求救待确认 = false
-        APP结算原生操作('')
+        APP结算原生操作('已经发出求救信号，救援队接管后续行程。', { 动作: '发出求救', 开始 })
       },
     }, [APP求救待确认 ? '确认求救？' : 救.文案]))
   }
 
   async function APP执行回合(选中项) {
     if (APP进行中) return
+    const APP回合开始 = storyPoint(state)
     APP进行中 = true
 
     // 清除上一次的错误提示
@@ -1040,6 +1205,15 @@ function renderGame(router) {
     ].filter(Boolean).join('\n'))
     if (APP会话.最近回合.length > 4) APP会话.最近回合.shift()
 
+    APP会话.完整故事.push(makeTurnStoryEntry({
+      序号: APP会话.完整故事.length + 1,
+      开始: APP回合开始,
+      结束: storyPoint(state),
+      选中项,
+      回合: r,
+    }))
+    APP刷新故事按钮()
+
     // 降级诊断。此前 UI 完全无视 r.降级 与 r.warnings——模型没按格式回时，
     // 玩家只会看到四个来路不明的兜底选项，既不知道出了什么事，也没法反馈。
     // 静默降级比报错更难查。
@@ -1099,12 +1273,13 @@ function renderGame(router) {
     ])
 
     // 写自动存档
-    writeSave(localStorage, 'auto', state, journal, APP会话.最近回合)
+    writeSave(localStorage, 'auto', state, journal, APP会话.最近回合, APP会话.完整故事)
     // 刷新面板
     APP渲染面板(state)
     // 更新顶栏与场景带。必须走 APP刷新顶栏——它内部才有「换了路段就换场景图」
     // 的逻辑。此前这里是一段只改文字的内联代码，换了地方场景图永远不动。
     APP刷新顶栏()
+    APP渲染路线图()
     const vm2 = gameViewModel({ state, 回合: r, 说话人: r.说话人 })
     // 结局跳转
     if (state.phase === '结局') {
@@ -1418,6 +1593,9 @@ function renderEnding(router) {
 
   // 再来一局。此前这一页没有任何按钮，自动存档又停在 phase=结局——
   // 刷新永远回到这里，重开的唯一办法是手动清 localStorage。死胡同。
+  const APP看旅程 = el('button', {
+    onclick: () => APP打开完整旅程(state, journal),
+  }, [`查看完整旅程（${APP会话.完整故事.length}）`])
   const APP再来 = el('button', {
     class: 'primary',
     onclick: () => {
@@ -1425,6 +1603,8 @@ function renderEnding(router) {
       APP会话.state = null
       APP会话.journal = null
       APP会话.最近回合 = []
+      APP会话.完整故事 = []
+      APP会话.故事从出发完整 = true
       APP会话.队友 = []
       APP会话.已重抽 = 0
       APP会话.cart = {}
@@ -1433,7 +1613,7 @@ function renderEnding(router) {
       router.go('create')
     },
   }, ['再来一局 →'])
-  root.appendChild(el('div', { class: 'row', style: 'margin-top:16px' }, [APP再来]))
+  root.appendChild(el('div', { class: 'row', style: 'margin-top:16px' }, [APP看旅程, APP再来]))
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -1461,6 +1641,8 @@ function 启动() {
     // 最近回合从存档还原——它是剧情连贯性的命脉。此前刷新即清零，
     // 模型拿不到上文，故事必从中间断档另起炉灶。
     APP会话.最近回合 = APP存档.最近回合 || []
+    APP会话.完整故事 = APP存档.完整故事 || []
+    APP会话.故事从出发完整 = APP存档.故事从出发完整 !== false
   }
 
   const 配置可用 = validateConfig(APP会话.config).ok

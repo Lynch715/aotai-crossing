@@ -1,4 +1,4 @@
-import { getNode, mainProgress, campPressure, ROUTE, isAdjacent } from '../data/route.js'
+import { getNode, mainProgress, campPressure, ROUTE, MAIN_PATH, PLANNED_CAMPS, isAdjacent } from '../data/route.js'
 import { getNpc } from '../data/npcs.js'
 import { getGear } from '../data/gear.js'
 import { activeParty } from '../engine/party.js'
@@ -8,6 +8,53 @@ import { hasItem } from '../engine/state.js'
 import { splitParagraphs } from './prose.js'
 
 const GAME_每次热食耗气 = 8
+
+const GAME_路线短名 = Object.freeze({
+  tangkou: '塘口', huoshaopo: '火烧坡', yingdi2900: '盆景园',
+  aoshan: '鳌山', maijieling: '麦秸岭', shuiwozi: '水窝子',
+  feijiliang1: '飞机梁Ⅰ', feijiliang3: '飞机梁Ⅲ', yingdi2800: '2800营地',
+  jinzita1: '金字塔', jiuchongshihai2: '九重石海', dongyuan: '东源',
+  wanxianzhen: '万仙阵', baxiantai: '拔仙台', dayehai: '大爷海',
+  dawengongmiao: '大文公庙', tianyuandifang: '天圆地方', xiabansi: '下板寺',
+})
+
+// 全线位置图只展示 18 个真正消耗回合的决策节点。梁2、塔2/3 等仍会在
+// 叙事中出现，但不伪装成玩家还要额外点击一次的站点。
+export function routeMapViewModel(state) {
+  const 当前id = state.place.nodeId === 'miaopu' ? 'tangkou' : state.place.nodeId
+  const 当前序号 = MAIN_PATH.indexOf(当前id)
+  const 压力 = campPressure(state.place.nodeId, state.clock.slot)
+  const 今晚营地id = 压力?.营地?.id || null
+
+  const 节点 = MAIN_PATH.map((id, index) => {
+    const node = getNode(id)
+    const 下撤 = ROUTE
+      .filter((n) => n.类型 === '下撤' && isAdjacent(id, n.id))
+      .map((n) => ({ id: n.id, 名称: n.名称 }))
+    return {
+      id,
+      序号: index + 1,
+      短名: id === 'tangkou' && state.place.nodeId === 'miaopu' ? '苗圃' : GAME_路线短名[id] || node?.名称 || id,
+      名称: id === 'tangkou' && state.place.nodeId === 'miaopu' ? '苗圃（备用起点）' : node?.名称 || id,
+      海拔: node?.海拔 || 0,
+      状态: index < 当前序号 ? '已走过' : index === 当前序号 ? '当前位置' : '未到达',
+      是计划营地: PLANNED_CAMPS.includes(id),
+      是今晚营地: id === 今晚营地id,
+      下撤,
+    }
+  })
+
+  const 当前节点 = getNode(state.place.nodeId)
+  return {
+    节点,
+    当前位置: 当前节点?.名称 || state.place.nodeId,
+    今晚营地: 压力?.营地?.名称 || '今日已无计划营地',
+    营地状态: 压力?.状态 || '',
+    营地说明: 压力
+      ? `${压力.剩余路段} 段路 · 今日还剩 ${压力.剩余时段} 个时段`
+      : '已进入终点或下撤路线',
+  }
+}
 
 // 原生操作的可用性。这些操作（进食/休整/求救）不经过 LLM——
 // consume.js 里的 eatHot/eatCold/rest 写了又测了，此前却没有任何调用方，

@@ -38,6 +38,26 @@ test('打包再解包，状态与档案原样回来', () => {
   assert.deepEqual(回来.journal.关键事件, [])
 })
 
+test('完整故事与最近回合分开持久化', () => {
+  const { state, journal } = 局面()
+  const 故事 = [{ 序号: 1, 类型: '剧情回合', 剧情: '从塘口出发。' }]
+  const 回来 = unpackSave(packSave(state, journal, ['仅供续写'], 故事))
+  assert.deepEqual(回来.最近回合, ['仅供续写'])
+  assert.deepEqual(回来.完整故事, 故事)
+  assert.equal(回来.故事从出发完整, true)
+})
+
+test('旧档没有完整故事时保留已有片段并明确标记不完整', () => {
+  const { state, journal } = 局面()
+  const 旧包 = JSON.stringify({
+    版本: STATE_VERSION, 摘要: '旧档', state, journal, 最近回合: ['旧剧情甲', '旧剧情乙'],
+  })
+  const 回来 = unpackSave(旧包)
+  assert.equal(回来.完整故事.length, 2)
+  assert.equal(回来.完整故事[0].旧记录, true)
+  assert.equal(回来.故事从出发完整, false)
+})
+
 test('存档带版本号与摘要，槽位列表不用解全量就能显示', () => {
   const { state, journal } = 局面()
   const 包 = JSON.parse(packSave(state, journal))
@@ -52,6 +72,14 @@ test('写入再读出', () => {
   writeSave(st, 'slot1', state, journal)
   const 读 = readSave(st, 'slot1')
   assert.equal(读.state.pc.名字, '周野')
+})
+
+test('写入再读取完整故事', () => {
+  const st = 假存储()
+  const { state, journal } = 局面()
+  const 故事 = [{ 序号: 1, 类型: '营地行动', 剧情: '整装出发。' }]
+  writeSave(st, 'slot1', state, journal, [], 故事)
+  assert.deepEqual(readSave(st, 'slot1').完整故事, 故事)
 })
 
 test('读空槽返回 null，不抛', () => {
